@@ -1,0 +1,53 @@
+{
+  "app": "ReadIt",
+  "version": 2,
+  "devices": [
+    {
+      "brand": "KYOCERA",
+      "model": "KY-01L",
+      "device": "ky01l",
+      "socClass": "A33_CLASS",
+      "ramClass": "LOW",
+      "resolution": "600x480",
+      "refreshMode": "QUALITY",
+      "input_keys": {
+        "PAGE_UP": "KEYCODE_PAGE_UP",
+        "PAGE_DOWN": "KEYCODE_PAGE_DOWN",
+        "BACK": "KEYCODE_BACK"
+      },
+      "notes": "600x480; Android 7.1; docomo定制固件，第三方APK需ADB侧载；出厂WebView约Chromium 52，不可升级 -> EPUB走降级路径"
+    },
+    {
+      "brand": "ONYX",
+      "model": "BOOX",
+      "device": "boox",
+      "socClass": "A53_CLASS_OR_ABOVE",
+      "ramClass": "MID",
+      "resolution": "1872x1404",
+      "refreshMode": "REGAL",
+      "input_keys": {
+        "PAGE_UP": "KEYCODE_PAGE_UP",
+        "PAGE_DOWN": "KEYCODE_PAGE_DOWN",
+        "BACK": "KEYCODE_BACK"
+      },
+      "notes": "Onyx/Boox 走 EPD SDK 反射路径"
+    },
+    {
+      "brand": "unknown",
+      "model": "generic_600x800",
+      "device": "generic_eink_6",
+      "socClass": "A33_CLASS",
+      "ramClass": "LOW",
+      "resolution": "600x800",
+      "refreshMode": "AUTO",
+      "input_keys": {},
+      "notes": "6英寸入门E-Ink主流分辨率，UI兜底验收基准"
+    }
+  ],
+  "fallback_rules": {
+    "unknown_soc": "A33_CLASS",
+    "unknown_ram": "LOW",
+    "default_refresh_mode": "AUTO",
+    "default_input_mode": "TOUCH"
+  }
+}

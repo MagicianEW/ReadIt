@@ -1,0 +1,227 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">阅即</string>
+    <string name="app_name_en">ReadIt</string>
+
+    <!-- EAL -->
+    <string name="eal_unknown_device">未知设备</string>
+    <string name="eal_soc_a33">兜底档 SoC</string>
+    <string name="eal_soc_a53">标准档 SoC</string>
+    <string name="eal_ram_low">低内存 (LOW)</string>
+    <string name="eal_ram_mid">中内存 (MID)</string>
+    <string name="eal_ram_high">高内存 (HIGH)</string>
+    <string name="eal_tier_auto">自动</string>
+    <string name="eal_tier_fallback">兜底</string>
+    <string name="eal_tier_standard">标准</string>
+    <string name="eal_tier_enhanced">增强</string>
+
+    <!-- Refresh -->
+    <string name="refresh_mode">刷新模式</string>
+    <string name="refresh_auto">自动</string>
+    <string name="refresh_quality">高质量</string>
+    <string name="refresh_fast">快速</string>
+    <string name="refresh_regal">局刷 / Regal</string>
+    <string name="refresh_system">系统默认</string>
+
+    <!-- Shelf -->
+    <string name="shelf_empty">还没有书，点「导入」添加 TXT / EPUB / DOCX / PDF</string>
+    <string name="action_import">导入</string>
+    <string name="action_settings">设置</string>
+    <string name="action_toc">目录</string>
+    <string name="action_typography">排版</string>
+    <string name="action_refresh">刷新</string>
+    <string name="action_cancel">取消</string>
+    <string name="action_prev_page">上一页</string>
+    <string name="action_next_page">下一页</string>
+    <string name="action_menu">菜单</string>
+    <string name="action_back">返回</string>
+    <string name="import_ok">已导入：%1$s</string>
+    <string name="import_failed">导入失败</string>
+    <string name="read_failed">读取失败，可尝试在设置中手动选择编码</string>
+
+    <!-- Reader -->
+    <string name="page_info">%1$d / %2$d</string>
+    <string name="no_chapter">未检测到章节，已按长度分页</string>
+    <string name="at_beginning">已经是第一页</string>
+    <string name="at_end">已经是最后一页</string>
+    <string name="key_not_mapped">未识别的按键，可在设置中学习</string>
+    <string name="label_font_size">字号</string>
+    <string name="label_line_spacing">行距</string>
+    <string name="label_margin">边距</string>
+
+    <!-- EPUB -->
+    <string name="epub_opening">正在打开 EPUB…</string>
+    <string name="epub_open_failed">EPUB 打开失败：%1$s</string>
+    <string name="epub_drm">该 EPUB 已加密（DRM），暂不支持</string>
+    <string name="epub_degraded">WebView 能力不足（Chromium 低于 55），已切换为纯文本模式，目录与章节保留</string>
+    <string name="epub_no_toc">未能解析目录，已按章节顺序阅读</string>
+    <string name="format_unsupported">暂不支持的格式：%1$s</string>
+    <string name="toc_empty">没有可用目录</string>
+
+    <!-- PDF -->
+    <string name="pdf_opening">正在打开 PDF…</string>
+    <string name="pdf_open_failed">PDF 打开失败：%1$s</string>
+    <string name="pdf_render_failed">PDF 渲染不可用，已切换为文本模式</string>
+    <string name="pdf_page_failed">第 %1$d 页渲染失败，可尝试翻页或返回重开</string>
+    <string name="pdf_page_timeout">第 %1$d 页渲染超时，可尝试翻页或返回重开</string>
+    <string name="pdf_timeout_fallback">PDF 渲染持续超时（本机性能不足），已切换为文本模式</string>
+    <string name="pdf_no_text">该 PDF 没有可提取的文本层</string>
+    <string name="pdf_encrypted_title">加密 PDF 暂不支持</string>
+    <string name="pdf_encrypted_message">该文件已加密（需要打开密码），本应用暂不支持解析。\n\nPdfium 渲染与 PdfBox 文本提取都需要密码才能读取，因此不会尝试降级为文本模式。</string>
+    <string name="pdf_scanned_title">疑似扫描版 PDF</string>
+    <string name="pdf_scanned_message">本文件未检测到文本层（约 %1$d 页采样）：搜索、选词、重排不可用，将按页面图像渲染。\n\n可继续导入或返回。</string>
+    <string name="pdf_force_import">继续导入</string>
+    <string name="pdf_crop_applied">已裁边</string>
+
+    <!-- DOCX -->
+    <string name="docx_opening">正在转换 DOCX…</string>
+    <string name="docx_open_failed">DOCX 打开失败：%1$s</string>
+    <string name="docx_degraded">已按子集渲染：%1$d 处复杂元素被简化</string>
+    <string name="docx_degraded_title">部分内容已简化</string>
+    <string name="docx_degraded_detail">DOCX 子集渲染支持：段落、标题、粗体/斜体/下划线/删除线、有序/无序列表、简单表格、内嵌图片。\n\n以下元素已跳过或简化：\n%1$s</string>
+    <string name="docx_no_toc">未能解析标题，未提供目录</string>
+    <string name="docx_empty">文档没有可显示的内容</string>
+    <string name="action_ok">知道了</string>
+
+    <!-- Sync -->
+    <string name="sync_running">正在同步…</string>
+    <string name="sync_done">同步完成：%1$s</string>
+    <string name="sync_not_configured">请先填写 WebDAV 服务器地址</string>
+    <string name="sync_failed">同步失败：%1$s</string>
+    <string name="sync_reset_done">已清空同步基线，下次同步将重新比对</string>
+    <string name="sync_cleartext_warning">已使用明文 HTTP：账号与书籍内容将以明文传输，建议改用 https 或仅在可信局域网内使用</string>
+
+    <!-- Key learning -->
+    <string name="key_learn_prompt">选择要绑定的动作，然后按下实体按键</string>
+    <string name="key_learn_ok">已学习按键 %1$d → %2$s</string>
+    <string name="key_learn_failed">无法学习此按键（已被系统占用）</string>
+
+    <!-- 无障碍（TalkBack）：文案即朗读内容，改动请一并评估朗读效果 -->
+    <string name="a11y_canvas">正文区域，第 %1$d 页，共 %2$d 页</string>
+    <string name="a11y_open_book">打开 %1$s</string>
+    <string name="a11y_chapter_item">目录项 %1$s</string>
+
+    <!-- 首次启动引导（Phase 4） -->
+    <string name="onboard_step">第 %1$d 步 / 共 %2$d 步</string>
+    <string name="onboard_next">下一步</string>
+    <string name="onboard_finish">完成</string>
+    <string name="onboard_prev">上一步</string>
+    <string name="onboard_skip">跳过</string>
+    <string name="pref_perf_tier_auto">自动（推荐）</string>
+    <string name="pref_perf_tier_fallback">兜底档：省内存优先</string>
+    <string name="pref_perf_tier_standard">标准档</string>
+    <string name="pref_perf_tier_enhanced">增强档：性能优先</string>
+    <string name="onboard_title_tier">性能档位</string>
+    <string name="onboard_desc_tier">档位决定 TXT 每页字数、EPUB 预加载章数、PDF 位图缓存页数与 DOCX 渲染方式。保持「自动」即可；若翻页明显卡顿可降到兜底档，若机器充裕可提到增强档。</string>
+    <string name="onboard_tier_detected">本机检测：SoC %1$s · RAM %2$s（%3$d MB）· %4$s</string>
+    <string name="onboard_known_yes">已在设备库中</string>
+    <string name="onboard_known_no">未知设备，按兜底规则处理</string>
+    <string name="onboard_title_refresh">刷新模式</string>
+    <string name="onboard_desc_refresh">E-Ink 的刷新策略直接决定残影多少。未适配厂商刷新接口的设备只能用「刷新屏幕」按钮手动全刷。</string>
+    <string name="onboard_title_input">按键绑定</string>
+    <string name="onboard_desc_input">按一次实体键即可绑定到上一页 / 下一页 / 菜单 / 返回。设备没有实体键或按键被系统占用时，可以直接跳过。</string>
+    <string name="onboard_learned_none">还没有学习任何按键（可用触摸翻页）。</string>
+    <string name="onboard_learned_keys">已学习：%1$s</string>
+    <string name="onboard_title_import">导入第一本书</string>
+    <string name="onboard_desc_import">支持 TXT / EPUB / DOCX / PDF。导入后回到书架点开即可阅读；稍后也可以随时在书架右上角继续导入。</string>
+    <string name="onboard_imported">已导入：%1$s</string>
+
+    <!-- 设备报告与按键采集（Phase 4） -->
+    <string name="diag_report_title">设备报告</string>
+    <string name="diag_key_title">按键采集</string>
+    <string name="diag_key_desc">点「开始采集」后按下设备上的所有实体键，可把本机真实按键码交给设备库维护者。返回键不会被拦截。</string>
+    <string name="diag_key_start">开始采集</string>
+    <string name="diag_key_stop">停止采集</string>
+    <string name="diag_key_started">已开始采集，请按下所有实体键</string>
+    <string name="diag_key_stopped">已停止采集</string>
+    <string name="diag_key_clear">清空</string>
+    <string name="diag_key_empty">尚未采集到按键。</string>
+    <string name="diag_export_report">导出设备报告 JSON</string>
+    <string name="diag_export_profile">导出设备库片段 JSON</string>
+    <string name="diag_copy">复制报告到剪贴板</string>
+    <string name="diag_copied">已复制到剪贴板</string>
+    <string name="diag_export_ok">已导出</string>
+    <string name="diag_export_failed">导出失败：%1$s</string>
+
+    <!-- 备份与恢复 -->
+    <string name="cat_backup">备份与恢复</string>
+    <string name="pref_backup_export">导出配置</string>
+    <string name="pref_backup_export_summary">把档位、排版、扫描阈值、WebDAV 地址与按键映射导出为 JSON</string>
+    <string name="pref_backup_import">导入配置</string>
+    <string name="pref_backup_import_summary">从 JSON 恢复上述配置（不含 WebDAV 密码）</string>
+    <string name="backup_export_ok">已导出配置</string>
+    <string name="backup_export_failed">导出失败：%1$s</string>
+    <string name="backup_import_ok">已恢复配置，按键映射 %1$d 条</string>
+    <string name="backup_import_failed">导入失败：%1$s</string>
+    <string name="backup_import_confirm_title">导入配置</string>
+    <string name="backup_import_confirm_msg">将覆盖当前的档位、排版、扫描阈值、WebDAV 地址与全部按键映射（密码不受影响，保留原值）。\n\n继续？</string>
+    <string name="pref_rerun_onboarding">重新运行首次引导</string>
+    <string name="pref_rerun_onboarding_summary">再走一遍性能档位 / 刷新模式 / 按键绑定 / 导入</string>
+    <string name="pref_app_version">版本</string>
+    <string name="pref_device_report">设备报告与按键采集</string>
+    <string name="pref_device_report_summary">导出设备信息，或采集本机按键码用于补充设备库</string>
+
+    <!-- Settings -->
+    <string name="cat_performance">性能与显示</string>
+    <string name="cat_reading">阅读与解析</string>
+    <string name="cat_sync">WebDAV 同步</string>
+    <string name="cat_input">输入</string>
+    <string name="cat_about">关于</string>
+    <string name="pref_perf_tier">性能档位</string>
+    <string name="pref_perf_tier_applied">已切换档位：SoC %1$s / RAM %2$s</string>
+    <string name="pref_refresh_mode">刷新模式</string>
+    <string name="pref_device_profile_import">导入设备配置</string>
+    <string name="pref_device_profile_import_summary">选择外部 JSON 覆盖/补充内置设备档位库</string>
+    <string name="import_profiles_ok">已导入 %1$d 个设备配置</string>
+    <string name="import_profiles_failed">设备配置导入失败：%1$s</string>
+    <string name="pref_pdf_crop">PDF 自动裁边</string>
+    <string name="pref_pdf_crop_summary">去除扫描件的白边，仅对图像渲染档生效</string>
+    <string name="pref_scan_sample_pages">扫描版检测采样页数</string>
+    <string name="pref_scan_sample_pages_summary">打开 PDF 时抽取的采样页数（1–10）</string>
+    <string name="pref_scan_min_chars">扫描版字符阈值</string>
+    <string name="pref_scan_min_chars_summary">单页文本层字符数低于该值视为无文本层</string>
+    <string name="pref_webdav_url">服务器地址</string>
+    <string name="pref_webdav_url_summary">例如 https://dav.example.com/remote.php/dav/files/user</string>
+    <string name="pref_webdav_user">用户名</string>
+    <string name="pref_webdav_password">密码</string>
+    <string name="pref_webdav_dir">书库目录</string>
+    <string name="pref_webdav_dir_summary">服务器上存放书籍的目录路径</string>
+    <string name="pref_sync_now">立即同步</string>
+    <string name="pref_sync_now_summary">双向同步：远端新增下载，本地新增上传</string>
+    <string name="pref_sync_reset">清空同步基线</string>
+    <string name="pref_sync_reset_summary">删除本地 ETag 记录，下次同步重新比对全部文件</string>
+    <string name="pref_key_learn">按键学习向导</string>
+    <string name="pref_key_learn_summary">按下实体键，绑定到上一页/下一页/菜单/返回</string>
+    <string name="pref_key_reset">恢复默认按键映射</string>
+    <string name="pref_key_reset_summary">清除全部已学习的按键</string>
+    <string name="pref_eal">设备档位</string>
+    <string name="pref_device_info">设备信息</string>
+    <string name="pref_device_info_summary">查看 EAL 检测结果</string>
+
+    <string-array name="perf_tier_entries">
+        <item>自动</item>
+        <item>兜底（低配）</item>
+        <item>标准</item>
+        <item>增强</item>
+    </string-array>
+    <string-array name="perf_tier_values">
+        <item>AUTO</item>
+        <item>FALLBACK</item>
+        <item>STANDARD</item>
+        <item>ENHANCED</item>
+    </string-array>
+    <string-array name="refresh_mode_entries">
+        <item>自动</item>
+        <item>高质量（残影少）</item>
+        <item>快速</item>
+        <item>局刷 / Regal</item>
+        <item>系统默认</item>
+    </string-array>
+    <string-array name="refresh_mode_values">
+        <item>AUTO</item>
+        <item>QUALITY</item>
+        <item>FAST</item>
+        <item>REGAL</item>
+        <item>SYSTEM</item>
+    </string-array>
+</resources>

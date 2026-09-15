@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+    <title>ReadIt</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #ffffff;
+            color: #000000;
+            overflow: hidden;
+        }
+
+        #viewer {
+            position: absolute;
+            left: 0;
+            top: 0;
+            right: 0;
+            bottom: 0;
+            overflow: hidden;
+        }
+
+        /* E-Ink：禁用全部动画 / 过渡 / 阴影，避免残影与灰阶抖动 */
+        *, *:before, *:after {
+            -webkit-transition: none !important;
+            transition: none !important;
+            -webkit-animation: none !important;
+            animation: none !important;
+            text-shadow: none !important;
+            box-shadow: none !important;
+        }
+    </style>
+    <!--
+      !! 加载顺序不能改 !!
+      epub.js 0.3.88 的 dist/epub.min.js 是 UMD 构建，把 JSZip 当**外部依赖**：
+        t.ePub = e(t.xmldom, t.JSZip)
+      它在脚本**执行的那一刻**就从全局取一次 JSZip 并闭包捕获。
+      所以 JSZip 必须先加载；事后注入无效，页面上会表现为
+      ePub(url) 能建出 Book，但 book.ready 既不 resolve 也不 reject —— 永久白屏、无报错。
+      （epub.js 要求 jszip ^3.4.0；随包附带的 libs/jszip 是 2.x，实例上没有 loadAsync，不能用。）
+      本目录下的 jszip.min.js 为 JSZip v3.10.1（MIT / GPLv3）。
+    -->
+    <script src="jszip.min.js"></script>
+    <script src="epub.min.js"></script>
+</head>
+<body>
+<div id="viewer"></div>
+<script>
+    (function () {
+        var book = null;
+        var rendition = null;
+        /*
+         * 单次渲染计时起点。
+         * 每次导航（open / display / displayCfi / next / prev）前都要重置，
+         * 否则后续重渲染会把「从打开本书到现在的总时长」当成渲染耗时上报
+         * （曾观测到 34s / 68s / 72s 这类假数字，会污染验收报告里的性能数据）。
+         */
+        var renderStart = 0;
+        var startCfi = "";
+
+        function fire(name, args) {
+            try {
+                var o = window.ReadItBridge;
+                if (o && typeof o[name] === "function") {
+                    o[name].apply(o, args);
+                }
+            } catch (e) {
+                /* 桥不可用时静默降级，避免污染页面 */
+            }
+        }
+
+        function hookRendition(r) {
+            r.on("rendered", function (section) {
+                var href = "";
+                try {
+                    href = (section && section.href) ? section.href : "";
+                } catch (e) {
+                }
+                fire("onRendered", [href, String(Date.now() - renderStart)]);
+            });
+            r.on("relocated", function (loc) {
+                if (!loc || !loc.start) {
+                    return;
+                }
+                var d = loc.start.displayed || {};
+                fire("onLocation", [
+                    String(loc.start.cfi || ""),
+                    String(loc.start.href || ""),
+                    String(loc.start.index || 0),
+                    String(d.page || 0),
+                    String(d.total || 0)
+                ]);
+            });
+            r.on("displayError", function (e) {
+                fire("onError", ["displayError: " + (e && e.message ? e.message : e)]);
+            });
+        }
+
+        window.ReadItEpub = {
+            hasEngine: function () {
+                return typeof window.ePub === "function";
+            },
+
+            open: function (url, cfi, fontPercent) {
+                renderStart = Date.now();
+                startCfi = cfi || "";
+                if (typeof window.ePub !== "function") {
+                    fire("onError", ["epub.js not loaded"]);
+                    return;
+                }
+                try {
+                    book = ePub(url);
+                } catch (e) {
+                    fire("onError", ["init: " + (e && e.message ? e.message : e)]);
+                    return;
+                }
+                book.ready.then(function () {
+                    var el = document.getElementById("viewer");
+                    rendition = book.renderTo(el, {
+                        width: "100%",
+                        height: "100%",
+                        spread: "none",
+                        flow: "paginated",
+                        minSpreadWidth: 100000
+                    });
+                    try {
+                        rendition.themes.override("color", "#000000");
+                        rendition.themes.override("background", "#ffffff");
+                        rendition.themes.fontSize(fontPercent + "%");
+                    } catch (e) {
+                    }
+                    hookRendition(rendition);
+                    /* 0 为首个 linear spine 项；有进度时用 CFI */
+                    return rendition.display(startCfi ? startCfi : 0).catch(function (err) {
+                        fire("onError", ["display: " + (err && err.message ? err.message : err)]);
+                    });
+                }).catch(function (err) {
+                    fire("onError", ["open: " + (err && err.message ? err.message : err)]);
+                });
+            },
+
+            display: function (index) {
+                if (!rendition) {
+                    return;
+                }
+                renderStart = Date.now();
+                rendition.display(index).catch(function (e) {
+                    fire("onError", ["jump: " + (e && e.message ? e.message : e)]);
+                });
+            },
+
+            displayCfi: function (cfi) {
+                if (!rendition) {
+                    return;
+                }
+                renderStart = Date.now();
+                rendition.display(cfi).catch(function (e) {
+                    fire("onError", ["jump: " + (e && e.message ? e.message : e)]);
+                });
+            },
+
+            next: function () {
+                if (rendition) {
+                    renderStart = Date.now();
+                    rendition.next();
+                }
+            },
+
+            prev: function () {
+                if (rendition) {
+                    renderStart = Date.now();
+                    rendition.prev();
+                }
+            },
+
+            setFont: function (percent) {
+                if (rendition) {
+                    try {
+                        rendition.themes.fontSize(percent + "%");
+                    } catch (e) {
+                    }
+                }
+            },
+
+            currentCfi: function () {
+                if (!rendition) {
+                    return "";
+                }
+                var loc = rendition.currentLocation();
+                if (loc && loc.start) {
+                    return String(loc.start.cfi || "");
+                }
+                return "";
+            },
+
+            destroy: function () {
+                try {
+                    if (book) {
+                        book.destroy();
+                    }
+                } catch (e) {
+                }
+                book = null;
+                rendition = null;
+            }
+        };
+
+        window.onerror = function (msg) {
+            fire("onError", ["js: " + msg]);
+            return false;
+        };
+    })();
+</script>
+</body>
+</html>

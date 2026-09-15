@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标（API 26+）。低于 26 的系统回退到 mipmap-*dpi/ic_launcher.png。
+
+  P5 真机冒烟修复：原先只有 res/drawable/ic_launcher.xml 一个纯 vector，
+  在 API 26+ 上被系统按 legacy icon 处理，MIUI 桌面上渲染成一个黑方块，
+  既不识别也不像"书"。改为标准自适应图标 + 各密度栅格回退。
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

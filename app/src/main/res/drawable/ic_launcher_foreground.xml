@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标前景层（API 26+）。
+  108x108dp 画布，安全区为居中 66x66，图形控制在约 48x36 以内，
+  圆形 / 圆角方 / 水滴等各种桌面裁切形状下都不会被切到。
+
+  造型：一本摊开的书（左右两页 + 中缝）。纯白填充，配合黑色背景层，
+  与 App 内 readit_fg / readit_bg 的纯黑白 E-Ink 调性一致。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 左页（含书脊侧的弧线），关于 x=54 与右页镜像 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M30,40 C30,35 34,32 39,33.4 L52,37 L52,74 L39,70.4 C34,69 30,71 30,76 Z" />
+
+    <!-- 右页 -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M78,40 C78,35 74,32 69,33.4 L56,37 L56,74 L69,70.4 C74,69 78,71 78,76 Z" />
+</vector>

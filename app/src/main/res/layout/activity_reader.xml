@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/drawer"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/readit_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!--
+            渲染舞台：TXT / EPUB-文本降级 用 TxtCanvasView；
+            EPUB 完整渲染的 WebView 由代码按需 addView —— 打开 TXT 时不该白白构造 WebView
+            （1GB 设备上 WebView 实例常占 30-60MB）。
+        -->
+        <FrameLayout
+            android:id="@+id/stage"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <com.readit.reader.txt.TxtCanvasView
+                android:id="@+id/txtCanvas"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:focusable="true" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:id="@+id/panelTypography"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/readit_bg"
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_font_size"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+
+                <SeekBar
+                    android:id="@+id/sbFontSize"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:contentDescription="@string/label_font_size" />
+
+                <TextView
+                    android:id="@+id/tvFontValue"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:gravity="end"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_line_spacing"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+
+                <SeekBar
+                    android:id="@+id/sbLineSpacing"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:contentDescription="@string/label_line_spacing" />
+
+                <TextView
+                    android:id="@+id/tvLineValue"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:gravity="end"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_margin"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+
+                <SeekBar
+                    android:id="@+id/sbMargin"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:contentDescription="@string/label_margin" />
+
+                <TextView
+                    android:id="@+id/tvMarginValue"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:gravity="end"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/readit_divider" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:padding="4dp">
+
+            <Button
+                android:id="@+id/btnToc"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/touch_target_min"
+                android:layout_weight="1"
+                android:text="@string/action_toc"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/btnTypography"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/touch_target_min"
+                android:layout_weight="1"
+                android:text="@string/action_typography"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/btnRefresh"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/touch_target_min"
+                android:layout_weight="1"
+                android:text="@string/action_refresh"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/btnSettings"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/touch_target_min"
+                android:layout_weight="1"
+                android:text="@string/action_settings"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvPageInfo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:accessibilityLiveRegion="polite"
+            android:gravity="center"
+            android:paddingBottom="4dp"
+            android:textColor="@color/readit_fg_secondary"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- 目录：宽度 90vw 由代码设置 -->
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/rvToc"
+        android:layout_width="240dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="@color/readit_bg" />
+</androidx.drawerlayout.widget.DrawerLayout>

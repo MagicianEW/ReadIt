@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- >=758px / sw600dp enhanced -->
+    <dimen name="toolbar_icon_size">40dp</dimen>
+    <dimen name="touch_target_min">56dp</dimen>
+    <dimen name="text_size_min">12sp</dimen>
+    <dimen name="text_size_default">16sp</dimen>
+</resources>

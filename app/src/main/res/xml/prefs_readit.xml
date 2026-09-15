@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <PreferenceCategory app:title="@string/cat_performance">
+        <ListPreference
+            app:defaultValue="AUTO"
+            app:entries="@array/perf_tier_entries"
+            app:entryValues="@array/perf_tier_values"
+            app:key="perf_tier"
+            app:title="@string/pref_perf_tier" />
+
+        <ListPreference
+            app:defaultValue="AUTO"
+            app:entries="@array/refresh_mode_entries"
+            app:entryValues="@array/refresh_mode_values"
+            app:key="refresh_mode"
+            app:title="@string/pref_refresh_mode" />
+
+        <Preference
+            app:key="device_profile_import"
+            app:summary="@string/pref_device_profile_import_summary"
+            app:title="@string/pref_device_profile_import" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/cat_reading">
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:key="pdf_crop"
+            app:summary="@string/pref_pdf_crop_summary"
+            app:title="@string/pref_pdf_crop" />
+
+        <EditTextPreference
+            app:defaultValue="3"
+            app:dialogTitle="@string/pref_scan_sample_pages"
+            app:key="scan_sample_pages"
+            app:summary="@string/pref_scan_sample_pages_summary"
+            app:title="@string/pref_scan_sample_pages" />
+
+        <EditTextPreference
+            app:defaultValue="100"
+            app:dialogTitle="@string/pref_scan_min_chars"
+            app:key="scan_min_chars"
+            app:summary="@string/pref_scan_min_chars_summary"
+            app:title="@string/pref_scan_min_chars" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/cat_sync">
+        <EditTextPreference
+            app:key="webdav_url"
+            app:summary="@string/pref_webdav_url_summary"
+            app:title="@string/pref_webdav_url" />
+
+        <EditTextPreference
+            app:key="webdav_user"
+            app:title="@string/pref_webdav_user" />
+
+        <EditTextPreference
+            app:key="webdav_password"
+            app:title="@string/pref_webdav_password" />
+
+        <EditTextPreference
+            app:defaultValue="/ReadIt"
+            app:key="webdav_dir"
+            app:summary="@string/pref_webdav_dir_summary"
+            app:title="@string/pref_webdav_dir" />
+
+        <Preference
+            app:key="sync_now"
+            app:summary="@string/pref_sync_now_summary"
+            app:title="@string/pref_sync_now" />
+
+        <Preference
+            app:key="sync_reset"
+            app:summary="@string/pref_sync_reset_summary"
+            app:title="@string/pref_sync_reset" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/cat_backup">
+        <Preference
+            app:key="backup_export"
+            app:summary="@string/pref_backup_export_summary"
+            app:title="@string/pref_backup_export" />
+
+        <Preference
+            app:key="backup_import"
+            app:summary="@string/pref_backup_import_summary"
+            app:title="@string/pref_backup_import" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/cat_input">
+        <Preference
+            app:key="key_learn"
+            app:summary="@string/pref_key_learn_summary"
+            app:title="@string/pref_key_learn" />
+
+        <Preference
+            app:key="key_reset"
+            app:summary="@string/pref_key_reset_summary"
+            app:title="@string/pref_key_reset" />
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/cat_about">
+        <Preference
+            app:key="eal_summary"
+            app:selectable="false"
+            app:title="@string/pref_eal" />
+
+        <Preference
+            app:key="app_version"
+            app:selectable="false"
+            app:title="@string/pref_app_version" />
+
+        <Preference
+            app:key="device_info"
+            app:summary="@string/pref_device_info_summary"
+            app:title="@string/pref_device_info" />
+
+        <Preference
+            app:key="device_report"
+            app:summary="@string/pref_device_report_summary"
+            app:title="@string/pref_device_report" />
+
+        <Preference
+            app:key="rerun_onboarding"
+            app:summary="@string/pref_rerun_onboarding_summary"
+            app:title="@string/pref_rerun_onboarding" />
+    </PreferenceCategory>
+</PreferenceScreen>

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- E-Ink friendly: pure black on white, no gray antialias background -->
+    <color name="readit_bg">#FFFFFF</color>
+    <color name="readit_fg">#FF000000</color>
+    <color name="readit_fg_secondary">#FF666666</color>
+    <color name="readit_divider">#FFCCCCCC</color>
+    <color name="readit_selection">#FF000000</color>
+
+    <!-- 启动图标背景层（自适应图标用）。纯黑，与 App 内纯黑白 E-Ink 调性一致 -->
+    <color name="ic_launcher_background">#FF000000</color>
+</resources>

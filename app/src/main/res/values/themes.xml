@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.ReadIt" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="android:windowBackground">@color/readit_bg</item>
+        <item name="android:textColorPrimary">@color/readit_fg</item>
+        <item name="android:textColorSecondary">@color/readit_fg_secondary</item>
+        <!-- E-Ink: 禁用窗口动画，减少残影 -->
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

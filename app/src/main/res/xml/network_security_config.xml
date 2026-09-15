@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    网络安全配置（F13 / §5.3）。
+
+    为什么必须显式放开明文：
+      targetSdk 24 起 Android 逐步收紧明文流量，API 28（Android 9）起
+      `cleartextTrafficPermitted` 默认为 false。此时任何 http:// 请求会直接抛
+      `Cleartext HTTP traffic to <host> not permitted`，**在 OkHttp 层加
+      ConnectionSpec.CLEARTEXT 也救不了** —— 那是协议协商声明，平台网络策略才是闸门。
+
+    为什么不能只用 domain-config 精确放行：
+      WebDAV 地址由用户在设置页填写（局域网 NAS / 自建服务，形如
+      http://192.168.1.10:5005/webdav），network-security-config 的 <domain>
+      只接受字面主机名或 IP，**不支持 CIDR / 通配网段**，无法预先枚举。
+
+    风险与取舍：
+      本应用的网络出口只有 WebDavClient 一处（书籍同步），面向侧载的封闭 E-Ink 设备。
+      放开明文是「局域网可用」与「最小暴露面」之间的取舍结果：不放明文则 F13 在
+      家用 NAS 这一主力场景完全不可用。设置页对 http:// 地址会给出明文传输提示。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

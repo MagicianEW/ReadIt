@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <supports-screens
+        android:smallScreens="true"
+        android:normalScreens="true"
+        android:largeScreens="true"
+        android:xlargeScreens="true"
+        android:anyDensity="true" />
+
+    <application
+        android:name="com.readit.eink.ReadItApp"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:largeHeap="true"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="false"
+        android:theme="@style/Theme.ReadIt">
+
+        <activity
+            android:name="com.readit.ui.shelf.ShelfActivity"
+            android:exported="true"
+            android:screenOrientation="portrait"
+            android:configChanges="keyboardHidden|orientation|screenSize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name="com.readit.ui.reader.ReaderActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
+
+        <activity
+            android:name="com.readit.ui.settings.SettingsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
+
+        <activity
+            android:name="com.readit.eink.ui.MainActivity"
+            android:exported="false"
+            android:label="@string/pref_device_info"
+            android:screenOrientation="portrait"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
+
+        <!-- 首次启动引导（Phase 4）：仅由书架在首次启动时拉起，也可从设置页重入 -->
+        <activity
+            android:name="com.readit.ui.onboarding.OnboardingActivity"
+            android:exported="false"
+            android:label="@string/app_name"
+            android:screenOrientation="portrait"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
+
+        <!-- 设备报告与按键采集（Phase 4 设备收集工具） -->
+        <activity
+            android:name="com.readit.ui.diag.DeviceCollectActivity"
+            android:exported="false"
+            android:label="@string/pref_device_report"
+            android:screenOrientation="portrait"
+            android:configChanges="keyboardHidden|orientation|screenSize" />
+
+        <!--
+            DOCX 转换独立进程（F04）：
+            DOCX 子集解析是 CPU + 堆敏感操作，隔离到 :converter 后，
+            即便解析进程被系统低内存杀手干掉，阅读器主进程依然存活。
+        -->
+        <service
+            android:name="com.readit.doc.DocxConvertService"
+            android:exported="false"
+            android:process=":converter" />
+    </application>
+
+</manifest>

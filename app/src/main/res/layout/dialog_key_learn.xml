@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/readit_bg"
+    android:orientation="vertical"
+    android:padding="20dp">
+
+    <TextView
+        android:id="@+id/tvKeyLearnPrompt"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="@string/key_learn_prompt"
+        android:textColor="@color/readit_fg"
+        android:textSize="15sp" />
+
+    <RadioGroup
+        android:id="@+id/rgActions"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp">
+
+        <RadioButton
+            android:id="@+id/rbPrev"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/touch_target_min"
+            android:checked="true"
+            android:text="@string/action_prev_page"
+            android:textColor="@color/readit_fg" />
+
+        <RadioButton
+            android:id="@+id/rbNext"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/touch_target_min"
+            android:text="@string/action_next_page"
+            android:textColor="@color/readit_fg" />
+
+        <RadioButton
+            android:id="@+id/rbMenu"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/touch_target_min"
+            android:text="@string/action_menu"
+            android:textColor="@color/readit_fg" />
+
+        <RadioButton
+            android:id="@+id/rbBack"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/touch_target_min"
+            android:text="@string/action_back"
+            android:textColor="@color/readit_fg" />
+    </RadioGroup>
+
+    <Button
+        android:id="@+id/btnCancel"
+        style="?android:attr/borderlessButtonStyle"
+        android:layout_width="wrap_content"
+        android:layout_height="@dimen/touch_target_min"
+        android:layout_gravity="end"
+        android:text="@string/action_cancel"
+        android:textSize="13sp" />
+</LinearLayout>
