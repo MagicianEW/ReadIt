@@ -203,4 +203,33 @@ class ConfigBackupTest {
         assertTrue(s.summary().contains("档位"))
         assertTrue(s.summary().contains("按键映射"))
     }
+
+    // ---------------------------------------------------------------- 书籍目录
+
+    @Test
+    fun `books dir round trips through json`() {
+        val prefs = freshPrefs()
+        prefs.booksDir = "/storage/emulated/0/ReadIt"
+        val restored = ConfigBackup.parse(ConfigBackup.toJson(ConfigBackup.snapshot(prefs, "v")))
+        assertEquals("/storage/emulated/0/ReadIt", restored.booksDir)
+    }
+
+    @Test
+    fun `restore of an existing books dir is applied`() {
+        val source = freshPrefs()
+        source.booksDir = ctx.cacheDir.absolutePath
+        val target = freshPrefs()
+        ConfigBackup.restore(target, ConfigBackup.parse(ConfigBackup.toJson(ConfigBackup.snapshot(source, "v"))))
+        assertEquals(ctx.cacheDir.absolutePath, target.booksDir)
+    }
+
+    @Test
+    fun `restore skips a books dir that does not exist`() {
+        // 备份可能来自另一台设备，路径未必存在；写进配置会让书架静默变空
+        val source = freshPrefs()
+        source.booksDir = "/no/such/dir/readit-xyz"
+        val target = freshPrefs()
+        ConfigBackup.restore(target, ConfigBackup.parse(ConfigBackup.toJson(ConfigBackup.snapshot(source, "v"))))
+        assertEquals("", target.booksDir)
+    }
 }

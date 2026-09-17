@@ -7,6 +7,7 @@ import com.readit.core.eal.PerfTier
 import com.readit.core.eal.RefreshMode
 import com.readit.core.util.ReadItLog
 import com.readit.data.prefs.ReadItPrefs
+import java.io.File
 import java.io.IOException
 
 /**
@@ -46,6 +47,8 @@ object ConfigBackup {
         val webDavUrl: String = "",
         val webDavUser: String = "",
         val webDavDir: String = ReadItPrefs.DEFAULT_WEBDAV_DIR,
+        /** 书籍保存目录绝对路径；空 = 应用内部默认目录 */
+        val booksDir: String = "",
         /** keyCode 的字符串形式 -> Action 名（Gson 对 Map<Int,*> 的键处理不直观，统一用字符串） */
         val keyMaps: Map<String, String> = emptyMap()
     ) {
@@ -71,6 +74,7 @@ object ConfigBackup {
         webDavUrl = prefs.webDavUrl,
         webDavUser = prefs.webDavUser,
         webDavDir = prefs.webDavDir,
+        booksDir = prefs.booksDir,
         keyMaps = prefs.allKeyMaps().mapKeys { it.key.toString() }
     )
 
@@ -118,6 +122,20 @@ object ConfigBackup {
         prefs.webDavUrl = s.webDavUrl
         prefs.webDavUser = s.webDavUser
         prefs.webDavDir = s.webDavDir
+
+        // 书籍目录：只有目标路径「真的存在且是目录」时才恢复。
+        // 备份可能来自另一台设备，路径未必存在；把无效路径写进配置会让书架静默变空，
+        // 所以宁可保留本机现值。空值代表「应用内部默认目录」，照常写入。
+        if (s.booksDir.isBlank()) {
+            prefs.booksDir = ""
+        } else {
+            val dir = File(s.booksDir)
+            if (dir.isDirectory) {
+                prefs.booksDir = dir.absolutePath
+            } else {
+                ReadItLog.w("config restore: booksDir 不存在或不是目录，保留本机现值: ${s.booksDir}")
+            }
+        }
 
         // 按键映射是「整组替换」而不是合并：备份代表用户当时的完整意图，
         // 合并会让上一台设备的映射残留下来。

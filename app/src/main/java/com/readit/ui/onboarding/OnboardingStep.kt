@@ -17,8 +17,11 @@ enum class OnboardingStep(val id: Int) {
     /** 按键学习（可跳过，设置页随时可回来） */
     INPUT(2),
 
+    /** 选择书籍保存目录（导入前必须先有落点） */
+    BOOKS_DIR(3),
+
     /** 导入第一本书 */
-    IMPORT(3);
+    IMPORT(4);
 
     val isFirst: Boolean get() = id == 0
     val isLast: Boolean get() = id == entries.size - 1

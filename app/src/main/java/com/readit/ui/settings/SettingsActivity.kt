@@ -1,6 +1,7 @@
 package com.readit.ui.settings
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -22,6 +23,7 @@ import com.readit.core.input.InputMapper
 import com.readit.core.util.ReadItLog
 import com.readit.data.backup.ConfigBackup
 import com.readit.data.prefs.ReadItPrefs
+import com.readit.data.storage.StorageManager
 import com.readit.eink.BuildConfig
 import com.readit.eink.R
 import com.readit.eink.ui.MainActivity
@@ -32,6 +34,7 @@ import com.readit.sync.webdav.WebDavClient
 import com.readit.ui.diag.DeviceCollectActivity
 import com.readit.ui.input.KeyLearnDialog
 import com.readit.ui.onboarding.OnboardingActivity
+import com.readit.ui.storage.DirPickerActivity
 import java.io.File
 import java.util.concurrent.Executors
 
@@ -75,15 +78,76 @@ class SettingsActivity : AppCompatActivity() {
                 if (uri != null) importConfig(uri)
             }
 
+        /** 书籍目录选择器（与首次引导共用） */
+        private val pickBooksDir =
+            registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+                if (result.resultCode != android.app.Activity.RESULT_OK) return@registerForActivityResult
+                val path = result.data?.getStringExtra(DirPickerActivity.EXTRA_DIR)
+                    ?: return@registerForActivityResult
+                applyBooksDir(path)
+            }
+
         override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
             setPreferencesFromResource(R.xml.prefs_readit, rootKey)
             val prefs = ReadItPrefs.get(requireContext())
 
+            bindStorage(prefs)
             bindPerformance(prefs)
             bindReading(prefs)
             bindSync(prefs)
             bindBackup()
             bindInput()
+            bindAbout()
+        }
+
+        // ------------------------------------------------------------ 存储
+
+        private fun bindStorage(prefs: ReadItPrefs) {
+            findPreference<Preference>("books_dir")?.let { p ->
+                p.summary = booksDirLabel(prefs)
+                p.setOnPreferenceClickListener {
+                    pickBooksDir.launch(
+                        DirPickerActivity.intent(
+                            requireContext(),
+                            StorageManager.booksDir(requireContext()).absolutePath
+                        )
+                    )
+                    true
+                }
+            }
+        }
+
+        private fun booksDirLabel(prefs: ReadItPrefs): String {
+            val dir = StorageManager.booksDir(requireContext())
+            return if (prefs.booksDir.isBlank()) {
+                getString(R.string.books_dir_current_default, dir.absolutePath)
+            } else {
+                getString(R.string.books_dir_current, dir.absolutePath)
+            }
+        }
+
+        /** 应用新目录：迁移在 IO 线程，结果回主线程提示并刷新 summary。 */
+        private fun applyBooksDir(path: String) {
+            val ctx = context ?: return
+            val appCtx = ctx.applicationContext
+            io.execute {
+                val msg: String = try {
+                    val r = StorageManager.applyBooksDir(appCtx, File(path))
+                    if (r.copied > 0 || r.skipped > 0 || r.failed > 0) {
+                        appCtx.getString(R.string.books_dir_migrated, r.copied, r.skipped, r.failed)
+                    } else {
+                        appCtx.getString(R.string.books_dir_applied, path)
+                    }
+                } catch (e: Exception) {
+                    ReadItLog.e("apply books dir failed", e)
+                    appCtx.getString(R.string.books_dir_apply_failed, e.message ?: "")
+                }
+                main.post {
+                    toast(msg)
+                    findPreference<Preference>("books_dir")?.summary =
+                        booksDirLabel(ReadItPrefs.get(appCtx))
+                }
+            }
         }
 
         // ------------------------------------------------------------ 性能与显示
@@ -352,6 +416,7 @@ class SettingsActivity : AppCompatActivity() {
             findPreference<EditTextPreference>("webdav_url")?.text = prefs.webDavUrl
             findPreference<EditTextPreference>("webdav_user")?.text = prefs.webDavUser
             findPreference<EditTextPreference>("webdav_dir")?.text = prefs.webDavDir
+            findPreference<Preference>("books_dir")?.summary = booksDirLabel(prefs)
         }
 
         // ------------------------------------------------------------ 输入
@@ -387,6 +452,50 @@ class SettingsActivity : AppCompatActivity() {
 
             findPreference<Preference>("eal_summary")?.summary =
                 runCatching { Eal.describe() }.getOrDefault("")
+        }
+
+        // ------------------------------------------------------------ 关于
+
+        private fun bindAbout() {
+            findPreference<Preference>("about")?.setOnPreferenceClickListener {
+                showAbout()
+                true
+            }
+        }
+
+        /**
+         * 关于对话框：软件名称 / 版本 / 开发者 / 项目主页。
+         *
+         * -VersionName/Code 取自 [BuildConfig]，不从资源再抄一份 —— 否则每次发版都可能忘了同步文案。
+         * - 仓库地址走 `ACTION_VIEW`，但**先 resolveActivity**：墨水屏设备不一定带浏览器，
+         *   直接 startActivity 会抛 ActivityNotFoundException 把设置页带到隔壁进程之外。
+         */
+        private fun showAbout() {
+            val repo = getString(R.string.about_repo_url)
+            val body = getString(
+                R.string.about_body,
+                getString(R.string.app_name),
+                getString(R.string.app_name_en),
+                BuildConfig.VERSION_NAME,
+                BuildConfig.VERSION_CODE,
+                getString(R.string.about_developer),
+                repo
+            )
+            AlertDialog.Builder(requireContext())
+                .setTitle(R.string.about_title)
+                .setMessage(body)
+                .setPositiveButton(R.string.about_open_repo) { _, _ -> openRepo(repo) }
+                .setNegativeButton(R.string.action_cancel, null)
+                .show()
+        }
+
+        private fun openRepo(url: String) {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            if (intent.resolveActivity(requireActivity().packageManager) != null) {
+                startActivity(intent)
+            } else {
+                toast(getString(R.string.about_browser_missing))
+            }
         }
 
         private fun toast(msg: String) {

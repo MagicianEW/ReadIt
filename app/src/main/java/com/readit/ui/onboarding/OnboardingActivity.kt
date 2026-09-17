@@ -18,6 +18,7 @@ import com.readit.data.prefs.ReadItPrefs
 import com.readit.data.storage.StorageManager
 import com.readit.eink.R
 import com.readit.ui.input.KeyLearnDialog
+import com.readit.ui.storage.DirPickerActivity
 import java.io.File
 
 /**
@@ -43,11 +44,13 @@ class OnboardingActivity : AppCompatActivity() {
     private lateinit var grpTier: View
     private lateinit var grpRefresh: View
     private lateinit var grpInput: View
+    private lateinit var grpBooksDir: View
     private lateinit var grpImport: View
     private lateinit var rgTier: RadioGroup
     private lateinit var rgRefresh: RadioGroup
     private lateinit var tvTierDetected: TextView
     private lateinit var tvLearnedKeys: TextView
+    private lateinit var tvBooksDir: TextView
     private lateinit var tvImported: TextView
     private lateinit var btnPrev: Button
     private lateinit var btnNext: Button
@@ -55,6 +58,15 @@ class OnboardingActivity : AppCompatActivity() {
     private val pickBook =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
             if (uri != null) importBook(uri)
+        }
+
+    /** 书籍目录选择器（首次引导与设置页共用同一个 Activity） */
+    private val pickBooksDir =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (result.resultCode != android.app.Activity.RESULT_OK) return@registerForActivityResult
+            val path = result.data?.getStringExtra(DirPickerActivity.EXTRA_DIR)
+                ?: return@registerForActivityResult
+            applyBooksDir(path)
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -69,11 +81,13 @@ class OnboardingActivity : AppCompatActivity() {
         grpTier = findViewById(R.id.grpTier)
         grpRefresh = findViewById(R.id.grpRefresh)
         grpInput = findViewById(R.id.grpInput)
+        grpBooksDir = findViewById(R.id.grpBooksDir)
         grpImport = findViewById(R.id.grpImport)
         rgTier = findViewById(R.id.rgTier)
         rgRefresh = findViewById(R.id.rgRefresh)
         tvTierDetected = findViewById(R.id.tvTierDetected)
         tvLearnedKeys = findViewById(R.id.tvLearnedKeys)
+        tvBooksDir = findViewById(R.id.tvBooksDir)
         tvImported = findViewById(R.id.tvImported)
         btnPrev = findViewById(R.id.btnPrev)
         btnNext = findViewById(R.id.btnNext)
@@ -86,6 +100,11 @@ class OnboardingActivity : AppCompatActivity() {
         }
         findViewById<Button>(R.id.btnPickBook).setOnClickListener {
             pickBook.launch(arrayOf("*/*"))
+        }
+        findViewById<Button>(R.id.btnPickDir).setOnClickListener {
+            pickBooksDir.launch(
+                DirPickerActivity.intent(this, StorageManager.booksDir(this).absolutePath)
+            )
         }
         btnPrev.setOnClickListener {
             step.prev()?.let { go(it) }
@@ -149,6 +168,10 @@ class OnboardingActivity : AppCompatActivity() {
                 tvTitle.setText(R.string.onboard_title_input)
                 tvDesc.setText(R.string.onboard_desc_input)
             }
+            OnboardingStep.BOOKS_DIR -> {
+                tvTitle.setText(R.string.onboard_title_books_dir)
+                tvDesc.setText(R.string.onboard_desc_books_dir)
+            }
             OnboardingStep.IMPORT -> {
                 tvTitle.setText(R.string.onboard_title_import)
                 tvDesc.setText(R.string.onboard_desc_import)
@@ -157,6 +180,7 @@ class OnboardingActivity : AppCompatActivity() {
         grpTier.visibility = if (step == OnboardingStep.TIER) View.VISIBLE else View.GONE
         grpRefresh.visibility = if (step == OnboardingStep.REFRESH) View.VISIBLE else View.GONE
         grpInput.visibility = if (step == OnboardingStep.INPUT) View.VISIBLE else View.GONE
+        grpBooksDir.visibility = if (step == OnboardingStep.BOOKS_DIR) View.VISIBLE else View.GONE
         grpImport.visibility = if (step == OnboardingStep.IMPORT) View.VISIBLE else View.GONE
 
         btnPrev.isEnabled = !step.isFirst
@@ -164,6 +188,7 @@ class OnboardingActivity : AppCompatActivity() {
 
         bindTierSummary()
         renderLearnedKeys()
+        renderBooksDir()
     }
 
     // ------------------------------------------------------------------ 步骤 1：档位
@@ -250,7 +275,43 @@ class OnboardingActivity : AppCompatActivity() {
         }
     }
 
-    // ------------------------------------------------------------------ 步骤 4：导入
+    // ------------------------------------------------------------------ 步骤 4：书籍目录
+
+    private fun renderBooksDir() {
+        if (!::tvBooksDir.isInitialized) return
+        val dir = StorageManager.booksDir(this)
+        tvBooksDir.text = if (ReadItPrefs.get(this).booksDir.isBlank()) {
+            getString(R.string.books_dir_current_default, dir.absolutePath)
+        } else {
+            getString(R.string.books_dir_current, dir.absolutePath)
+        }
+    }
+
+    /**
+     * 应用新目录：迁移是 IO，放后台线程；结果回主线程提示。
+     * （首次引导通常没有旧书，但设置页重入时可能有。）
+     */
+    private fun applyBooksDir(path: String) {
+        Thread {
+            val msg: String = try {
+                val r = StorageManager.applyBooksDir(applicationContext, File(path))
+                if (r.copied > 0 || r.skipped > 0 || r.failed > 0) {
+                    getString(R.string.books_dir_migrated, r.copied, r.skipped, r.failed)
+                } else {
+                    getString(R.string.books_dir_applied, path)
+                }
+            } catch (e: Exception) {
+                ReadItLog.e("apply books dir failed", e)
+                getString(R.string.books_dir_apply_failed, e.message ?: "")
+            }
+            runOnUiThread {
+                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                renderBooksDir()
+            }
+        }.start()
+    }
+
+    // ------------------------------------------------------------------ 步骤 5：导入
 
     private fun importBook(uri: Uri) {
         try {

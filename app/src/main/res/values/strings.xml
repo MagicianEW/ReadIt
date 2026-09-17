@@ -160,6 +160,16 @@
     <string name="pref_app_version">版本</string>
     <string name="pref_device_report">设备报告与按键采集</string>
     <string name="pref_device_report_summary">导出设备信息，或采集本机按键码用于补充设备库</string>
+    <string name="pref_about">关于</string>
+    <string name="pref_about_summary">软件名称、版本、开发者与项目主页</string>
+
+    <!-- 关于对话框：四项信息分别是 中文名 / 英文名 / versionName / versionCode / 开发者 / 仓库地址 -->
+    <string name="about_title">关于</string>
+    <string name="about_body">软件名称：%1$s（%2$s）\n版本号：%3$s（%4$d）\n开发者：%5$s\n项目主页：%6$s</string>
+    <string name="about_developer">MagicianEW</string>
+    <string name="about_repo_url">https://github.com/MagicianEW/ReadIt</string>
+    <string name="about_open_repo">打开项目主页</string>
+    <string name="about_browser_missing">本机没有可以打开链接的应用</string>
 
     <!-- Settings -->
     <string name="cat_performance">性能与显示</string>
@@ -197,6 +207,38 @@
     <string name="pref_eal">设备档位</string>
     <string name="pref_device_info">设备信息</string>
     <string name="pref_device_info_summary">查看 EAL 检测结果</string>
+
+    <!-- 书籍保存目录 -->
+    <string name="action_confirm">确定</string>
+    <string name="cat_storage">存储</string>
+    <string name="pref_books_dir">书籍保存目录</string>
+    <string name="pref_books_dir_summary">点按更换；所选目录须为空</string>
+    <string name="books_dir_pick">选择目录</string>
+    <string name="books_dir_current">当前：%1$s</string>
+    <string name="books_dir_current_default">当前：%1$s（应用内部目录）</string>
+    <string name="books_dir_applied">书籍目录已设为：%1$s</string>
+    <string name="books_dir_apply_failed">设置目录失败：%1$s</string>
+    <string name="books_dir_migrated">目录已切换：迁移 %1$d 本，跳过同名 %2$d，失败 %3$d</string>
+    <string name="books_dir_not_exist">目录不存在</string>
+    <string name="books_dir_not_dir">所选不是文件夹</string>
+    <string name="books_dir_not_readable">目录不可读</string>
+    <string name="books_dir_not_writable">目录不可写，请选择有写入权限的位置</string>
+    <string name="books_dir_not_empty">目录非空，请选择空文件夹或先新建一个</string>
+    <string name="books_dir_ok">目录可用</string>
+    <string name="books_dir_need_perm">需要存储权限才能选择目录</string>
+    <string name="books_dir_need_all_files">请在接下来的系统页面授予「所有文件访问」权限</string>
+    <string name="onboard_title_books_dir">书籍保存目录</string>
+    <string name="onboard_desc_books_dir">导入的书会保存到这个目录，读书时也从这里读取。建议选一个空的文件夹（例如 SD 卡上的 ReadIt）；目录必须为空，以免与既有文件混在一起。保持默认则使用应用内部目录。</string>
+    <string name="dir_picker_title">选择书籍目录</string>
+    <string name="dir_picker_up">上级</string>
+    <string name="dir_picker_new">新建文件夹</string>
+    <string name="dir_picker_select">选择此目录</string>
+    <string name="dir_picker_empty">没有子文件夹</string>
+    <string name="dir_picker_new_title">新建文件夹</string>
+    <string name="dir_picker_new_default">ReadIt</string>
+    <string name="dir_picker_created">已新建：%1$s</string>
+    <string name="dir_picker_exists">同名文件夹已存在，已进入</string>
+    <string name="dir_picker_create_failed">新建失败</string>
 
     <string-array name="perf_tier_entries">
         <item>自动</item>

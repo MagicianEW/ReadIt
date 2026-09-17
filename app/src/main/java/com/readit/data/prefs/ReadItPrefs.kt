@@ -29,6 +29,7 @@ class ReadItPrefs(private val sp: SharedPreferences) {
         private const val K_WEBDAV_PASSWORD = "webdav_password"
         private const val K_WEBDAV_DIR = "webdav_dir"
         private const val K_ONBOARDING_DONE = "onboarding_done"
+        private const val K_BOOKS_DIR = "books_dir"
 
         @Volatile
         private var instance: ReadItPrefs? = null
@@ -183,4 +184,17 @@ class ReadItPrefs(private val sp: SharedPreferences) {
     var onboardingDone: Boolean
         get() = sp.getBoolean(K_ONBOARDING_DONE, false)
         set(v) = sp.edit().putBoolean(K_ONBOARDING_DONE, v).apply()
+
+    // ---------------------------------------------------------------- 书籍目录
+
+    /**
+     * 书籍保存目录（绝对路径）。**空 = 使用应用内部默认目录**（`filesDir/books`）。
+     *
+     * 用真实路径而非 SAF 树 URI：阅读器四条读取链（TXT/EPUB/DOCX/PDF）全走
+     * `java.io.File` 绝对路径，改造成 `DocumentFile` 代价过大；故采用
+     * 「真实路径 + 分级存储权限」（API30+ 需用户授予「所有文件访问」）。
+     */
+    var booksDir: String
+        get() = sp.getString(K_BOOKS_DIR, "").orEmpty()
+        set(v) = sp.edit().putString(K_BOOKS_DIR, v.trim()).apply()
 }

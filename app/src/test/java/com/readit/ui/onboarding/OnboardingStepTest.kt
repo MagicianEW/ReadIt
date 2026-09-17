@@ -24,7 +24,7 @@ class OnboardingStepTest {
     fun `last step has no next`() {
         assertTrue(OnboardingStep.IMPORT.isLast)
         assertNull(OnboardingStep.IMPORT.next())
-        assertEquals(OnboardingStep.INPUT, OnboardingStep.IMPORT.prev())
+        assertEquals(OnboardingStep.BOOKS_DIR, OnboardingStep.IMPORT.prev())
     }
 
     @Test
@@ -56,7 +56,14 @@ class OnboardingStepTest {
     fun `unknown id falls back to first step`() {
         assertEquals(OnboardingStep.TIER, OnboardingStep.of(-1))
         assertEquals(OnboardingStep.TIER, OnboardingStep.of(99))
-        assertEquals(OnboardingStep.IMPORT, OnboardingStep.of(3))
+        assertEquals(OnboardingStep.BOOKS_DIR, OnboardingStep.of(3))
+        assertEquals(OnboardingStep.IMPORT, OnboardingStep.of(4))
+    }
+
+    @Test
+    fun `books dir step sits right before import`() {
+        assertEquals(OnboardingStep.IMPORT, OnboardingStep.BOOKS_DIR.next())
+        assertEquals(OnboardingStep.INPUT, OnboardingStep.BOOKS_DIR.prev())
     }
 
     @Test

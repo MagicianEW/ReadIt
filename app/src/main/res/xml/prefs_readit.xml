@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
 
+    <PreferenceCategory app:title="@string/cat_storage">
+        <Preference
+            app:key="books_dir"
+            app:summary="@string/pref_books_dir_summary"
+            app:title="@string/pref_books_dir" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="@string/cat_performance">
         <ListPreference
             app:defaultValue="AUTO"
@@ -100,6 +107,11 @@
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/cat_about">
+        <Preference
+            app:key="about"
+            app:summary="@string/pref_about_summary"
+            app:title="@string/pref_about" />
+
         <Preference
             app:key="eal_summary"
             app:selectable="false"
