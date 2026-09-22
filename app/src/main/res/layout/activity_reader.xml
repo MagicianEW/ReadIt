@@ -126,6 +126,27 @@
                     android:textColor="@color/readit_fg"
                     android:textSize="13sp" />
             </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_font_family"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+
+                <Spinner
+                    android:id="@+id/spFontFamily"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:contentDescription="@string/label_font_family" />
+            </LinearLayout>
         </LinearLayout>
 
         <View
@@ -156,6 +177,23 @@
                 android:layout_weight="1"
                 android:text="@string/action_typography"
                 android:textSize="13sp" />
+
+            <!--
+                F15：手动选择编码的常驻入口。
+                只靠「自动检测失败 / 解出乱码」自动弹是不够的——单字节编码
+                （KOI8-R / ISO-8859-1）解任何字节都不产生替换字符，误检时
+                乱码判定抓不到，用户必须有个随时能改的地方。
+                仅自绘文本模式有意义，由代码控制显隐。
+            -->
+            <Button
+                android:id="@+id/btnEncoding"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/touch_target_min"
+                android:layout_weight="1"
+                android:text="@string/action_encoding"
+                android:textSize="13sp"
+                android:visibility="gone" />
 
             <Button
                 android:id="@+id/btnRefresh"

@@ -2,6 +2,7 @@ package com.readit.data.storage
 
 import android.content.Context
 import com.readit.core.util.ReadItLog
+import com.readit.data.ProgressStore
 import com.readit.data.prefs.ReadItPrefs
 import java.io.File
 import java.io.FileInputStream
@@ -196,4 +197,77 @@ object StorageManager {
 
     private fun samePath(a: File, b: File): Boolean =
         runCatching { a.canonicalPath == b.canonicalPath }.getOrDefault(a.absolutePath == b.absolutePath)
+
+    // ---------------------------------------------------------------- 删除 / 重命名（书架长按菜单）
+
+    /**
+     * 删除一本书：**先删文件，删成功了才清按书记忆**。
+     *
+     * 顺序不能反 —— 反了之后遇到只读目录 / 权限不足，文件还在而进度与编码记忆已经清空，
+     * 用户看到的是「书还在，但读到哪、什么编码全忘了」，而且不报错。
+     *
+     * @return true = 文件已不存在（含本来就不存在）+ 记忆已清
+     */
+    fun deleteBook(context: Context, file: File): Boolean {
+        val app = context.applicationContext
+
+        // 文件本来就不在（比如上次删除只成功了一半）：直接把记忆收干净
+        if (!file.exists()) {
+            clearBookState(app, file.name)
+            return true
+        }
+
+        val ok = try {
+            file.delete()
+        } catch (e: Exception) {
+            ReadItLog.e("delete book failed: ${file.name}", e)
+            false
+        }
+
+        return if (ok) {
+            clearBookState(app, file.name)
+            ReadItLog.i("book deleted: ${file.name}")
+            true
+        } else {
+            // 目录只读 / 被占用：文件留着，记忆也必须留着，否则就是静默数据丢失
+            ReadItLog.w("book delete returned false, state kept: ${file.name}")
+            false
+        }
+    }
+
+    /**
+     * 重命名一本书，并把按书记忆（进度 / 编码 / 强制导入标记）一并搬到新名字。
+     *
+     * 同目录内 `renameTo` 是原子的，失败就是真失败 —— 这里**不做「复制 + 删除」兜底**，
+     * 因为那种兜底在复制到一半出错时会留下半个文件，比直接失败更糟。
+     * 目标名是否合法 / 是否重名由 [BookRename.decide] 在调用前判定，这里再查一次防 TOCTOU。
+     *
+     * @return 改名后的文件；失败返回 null（原文件保持不动）
+     */
+    fun renameBook(context: Context, file: File, newFileName: String): File? {
+        val app = context.applicationContext
+        val dir = file.parentFile ?: booksDir(app)
+        val dest = File(dir, newFileName)
+
+        if (newFileName == file.name) return file
+        if (dest.exists()) {
+            ReadItLog.w("rename target exists, refused: $newFileName")
+            return null
+        }
+        if (!file.renameTo(dest)) {
+            ReadItLog.w("rename failed: ${file.name} -> $newFileName")
+            return null
+        }
+
+        // 文件已经改了名，记忆必须跟着搬，否则进度与编码记忆全部失联
+        ReadItPrefs.get(app).moveBookPrefs(file.name, newFileName)
+        ProgressStore.move(app, file.name, newFileName)
+        ReadItLog.i("book renamed: ${file.name} -> $newFileName")
+        return dest
+    }
+
+    private fun clearBookState(context: Context, bookId: String) {
+        ReadItPrefs.get(context).clearBookPrefs(bookId)
+        ProgressStore.delete(context, bookId)
+    }
 }

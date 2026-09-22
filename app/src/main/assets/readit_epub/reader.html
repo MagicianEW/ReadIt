@@ -24,6 +24,26 @@
             overflow: hidden;
         }
 
+        /*
+          ReadIt 内置打包字体（OFL，见 tools/gen_packaged_fonts.py）。
+          页面本身是 file:///android_asset/readit_epub/reader.html，与 fonts/ 同属 android_asset，
+          所以 ../fonts/... 能直接加载（DOCX 那边的 WebView 禁了 file 访问，故只在这里声明）。
+          @font-face 是懒加载的：不选中这两款字体就不会去读文件，不占内存。
+        */
+        @font-face {
+            font-family: 'ReadIt Serif SC';
+            src: url('../fonts/readit_font_notoserif_sc.otf') format('opentype');
+            font-weight: normal;
+            font-style: normal;
+        }
+
+        @font-face {
+            font-family: 'ReadIt WenKai';
+            src: url('../fonts/readit_font_lxgw_wenkai.ttf') format('truetype');
+            font-weight: normal;
+            font-style: normal;
+        }
+
         /* E-Ink：禁用全部动画 / 过渡 / 阴影，避免残影与灰阶抖动 */
         *, *:before, *:after {
             -webkit-transition: none !important;
@@ -105,9 +125,10 @@
                 return typeof window.ePub === "function";
             },
 
-            open: function (url, cfi, fontPercent) {
+            open: function (url, cfi, fontPercent, fontFamily) {
                 renderStart = Date.now();
                 startCfi = cfi || "";
+                fontFamily = fontFamily || "sans-serif";
                 if (typeof window.ePub !== "function") {
                     fire("onError", ["epub.js not loaded"]);
                     return;
@@ -131,6 +152,7 @@
                         rendition.themes.override("color", "#000000");
                         rendition.themes.override("background", "#ffffff");
                         rendition.themes.fontSize(fontPercent + "%");
+                        rendition.themes.override("font-family", fontFamily);
                     } catch (e) {
                     }
                     hookRendition(rendition);
@@ -181,6 +203,15 @@
                 if (rendition) {
                     try {
                         rendition.themes.fontSize(percent + "%");
+                    } catch (e) {
+                    }
+                }
+            },
+
+            setFontFamily: function (family) {
+                if (rendition && family) {
+                    try {
+                        rendition.themes.override("font-family", family);
                     } catch (e) {
                     }
                 }

@@ -31,6 +31,7 @@ data class ScanThresholds(
 /**
  * 扫描版判定结果。
  *
+ * @param sampledPages 实际抽过的页数；提前收工时小于计划采样页数
  * @param avgCharsPerPage 采样页平均文本层字符数
  * @param imagePageRatio 采样页中「含整页大图」的比例
  * @param maxImageAreaRatio 采样页里最大的「图像面积 / 页面面积」比值
@@ -41,11 +42,26 @@ data class ScanVerdict(
     val avgCharsPerPage: Float,
     val imagePageRatio: Float,
     val maxImageAreaRatio: Float,
-    val reason: String
+    val reason: String,
+    /**
+     * 本次检测的实际耗时（毫秒）。
+     *
+     * 采样页数直接决定它，而它又是 PDF 首屏延迟的主要成本项（§9.4），
+     * 所以必须留在判定结果里随日志一起输出，否则「少采样省了多少」只靠猜。
+     */
+    val costMs: Long = 0,
+    /**
+     * 是否提前收工（没抽满计划的采样页数就定了结论）。
+     *
+     * `scanned = lowText && enoughImages`，而 `lowText` 只看「累计字符 < 阈值×页数」。
+     * 所以累计字符一旦达标，`lowText` 已为假、`scanned` 必为假，其余页不必再抽 ——
+     * 这是**等价推理不是近似**，用不到 1 页采样的代价就能拿到同样的省时（§9.4）。
+     */
+    val earlyExit: Boolean = false
 ) {
     fun describe(): String = String.format(
         java.util.Locale.ROOT,
-        "scanned=%s pages=%d chars/page=%.1f imgPages=%.2f maxImgArea=%.2f (%s)",
-        scanned, sampledPages, avgCharsPerPage, imagePageRatio, maxImageAreaRatio, reason
+        "scanned=%s pages=%d chars/page=%.1f imgPages=%.2f maxImgArea=%.2f cost=%dms early=%s (%s)",
+        scanned, sampledPages, avgCharsPerPage, imagePageRatio, maxImageAreaRatio, costMs, earlyExit, reason
     )
 }

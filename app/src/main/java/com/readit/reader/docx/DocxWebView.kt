@@ -8,6 +8,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.readit.core.util.ReadItLog
 import com.readit.doc.DocxHtmlToc
+import org.json.JSONObject
 import java.io.File
 
 /**
@@ -34,11 +35,16 @@ class DocxWebView @JvmOverloads constructor(
             override fun onPageFinished(view: WebView?, url: String?) {
                 ReadItLog.i("docx webview finished: $url")
                 pageReady = true
+                if (!loadedOnce) {
+                    loadedOnce = true
+                    onLoaded?.invoke() // §7 PDF/DOCX 首屏口径：内容真的挂上去了
+                }
                 pendingHeading?.let { id ->
                     pendingHeading = null
                     // 等一帧让布局定下来再滚，否则可能滚到旧高度
                     post { runScrollJs(id) }
                 }
+                post { runFontJs(fontFamily) }
             }
         }
         @Suppress("DEPRECATION")
@@ -78,6 +84,16 @@ class DocxWebView @JvmOverloads constructor(
     @Volatile
     private var pageReady = false
 
+    /** 首次加载完成回调（每本只触发一次），供 §7 首屏指标取时使用 */
+    var onLoaded: (() -> Unit)? = null
+    private var loadedOnce = false
+
+    /** 当前字体（CSS font-family）；页面就绪后会重放一次 */
+    private var fontFamily: String = DEFAULT_FONT_FAMILY
+
+    /** 打包字体的 @font-face 源（相对 baseUrl），null = 用系统/默认族名，不需要下载字体 */
+    private var fontFaceSrc: String? = null
+
     /**
      * 挂载 HTML。[baseDir] 为图片所在目录，null 时退化为无 baseUrl 的内联加载。
      */
@@ -85,6 +101,7 @@ class DocxWebView @JvmOverloads constructor(
         // 新文档：上一次的待跳锚点作废，就绪位清空
         pendingHeading = null
         pageReady = false
+        loadedOnce = false
         val base = baseDir?.let { "file://${it.absolutePath}/" }
         try {
             loadDataWithBaseURL(base, html, "text/html", "utf-8", null)
@@ -116,10 +133,49 @@ class DocxWebView @JvmOverloads constructor(
         }
     }
 
+    /**
+     * 切换字体（CSS font-family）。
+     *
+     * DOCX 的 HTML 里常带内联 `font-family`，只改 `body` 会被子元素覆盖，
+     * 所以注入一条 `* { font-family: X !important }` 的 style 标签。
+     * 页面未就绪时挂起，等 `onPageFinished` 再应用（同 `pendingHeading` 的处理）。
+     *
+     * [faceSrc] 是打包字体的@font-face 源——相对 `loadDataWithBaseURL` 的 baseUrl 的路径。
+     * 之前内置字体在 DOCX 上「无效」并不是被 WebView 拦了，而是根本没给它参考=@font-face：
+     * 图片走的就是同一套 file:// 相对路径，能显示说明子资源是放行的。
+     * 只要有这条声明，CSS 就会自己去把字体捞回来。
+     */
+    fun setFontFamily(cssFamily: String, faceSrc: String? = null) {
+        fontFamily = cssFamily
+        fontFaceSrc = faceSrc
+        if (!pageReady) return
+        runFontJs(cssFamily)
+    }
+
+    private fun runFontJs(cssFamily: String) {
+        try {
+            val face = fontFaceSrc?.let { src ->
+                "@font-face{font-family:$cssFamily;src:url('$src');font-display:block;}"
+            }.orEmpty()
+            val js = "(function(){var s=document.getElementById('readit-font');" +
+                "if(!s){s=document.createElement('style');s.id='readit-font';" +
+                "(document.head||document.documentElement).appendChild(s);}" +
+                "s.textContent=" + JSONObject.quote(face) + "+" +
+                JSONObject.quote("*{font-family:$cssFamily !important;}") + ";})();"
+            evaluateJavascript(js, null)
+        } catch (e: Throwable) {
+            ReadItLog.w("docx setFontFamily failed: ${e.message}")
+        }
+    }
+
     /** 当前滚动位置比例，用于进度兜底（0f~1f） */
     fun scrollRatio(): Float {
         val range = contentHeight - height
         if (range <= 0) return 0f
         return (scrollY.toFloat() / range.toFloat()).coerceIn(0f, 1f)
+    }
+
+    companion object {
+        const val DEFAULT_FONT_FAMILY = "sans-serif"
     }
 }

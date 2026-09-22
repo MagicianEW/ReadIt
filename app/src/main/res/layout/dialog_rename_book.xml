@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  重命名书籍对话框（书架长按 → 重命名）。
+
+  为什么扩展名单独做成一行说明而不放进输入框：扩展名决定用哪条解析链路打开
+  （TXT / EPUB / DOCX / PDF），让用户在同一个输入框里顺手改掉，书就打不开了。
+  这里只让改基名，扩展名以提示行展示。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="20dp"
+    android:paddingEnd="20dp"
+    android:paddingTop="8dp">
+
+    <EditText
+        android:id="@+id/etBookName"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:contentDescription="@string/rename_field_label"
+        android:hint="@string/rename_hint"
+        android:inputType="text"
+        android:maxLines="1"
+        android:textColor="@color/readit_fg"
+        android:textSize="15sp" />
+
+    <TextView
+        android:id="@+id/tvExtNote"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:textColor="@color/readit_fg_secondary"
+        android:textSize="12sp" />
+
+    <TextView
+        android:id="@+id/tvNameError"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:accessibilityLiveRegion="polite"
+        android:textColor="@color/readit_fg"
+        android:textSize="13sp"
+        android:visibility="gone" />
+</LinearLayout>

@@ -16,6 +16,7 @@ class ReadItPrefs(private val sp: SharedPreferences) {
         private const val K_PERF_TIER = "perf_tier"
         private const val K_REFRESH_MODE = "refresh_mode"
         private const val K_FONT_SIZE_SP = "font_size_sp"
+        private const val K_FONT_FAMILY = "font_family"
         private const val K_LINE_SPACING = "line_spacing"
         private const val K_MARGIN_DP = "margin_dp"
         private const val K_KEYMAP_PREFIX = "keymap_"
@@ -24,12 +25,20 @@ class ReadItPrefs(private val sp: SharedPreferences) {
         private const val K_SCAN_MIN_CHARS = "scan_min_chars"
         private const val K_SCAN_MIN_IMAGE_RATIO = "scan_min_image_ratio"
         private const val K_FORCE_IMPORT_PREFIX = "force_import_"
+        private const val K_CHARSET_PREFIX = "charset_"
         private const val K_WEBDAV_URL = "webdav_url"
         private const val K_WEBDAV_USER = "webdav_user"
         private const val K_WEBDAV_PASSWORD = "webdav_password"
         private const val K_WEBDAV_DIR = "webdav_dir"
         private const val K_ONBOARDING_DONE = "onboarding_done"
         private const val K_BOOKS_DIR = "books_dir"
+        private const val K_LIGHT_ON = "light_on"
+        private const val K_LIGHT_LEVEL = "light_level"
+        private const val K_SYNC_AUTO = "sync_auto"
+
+        /** 屏幕灯默认开着；默认亮度 50% */
+        const val DEFAULT_LIGHT_ON = true
+        const val DEFAULT_LIGHT_LEVEL = 50
 
         @Volatile
         private var instance: ReadItPrefs? = null
@@ -47,9 +56,13 @@ class ReadItPrefs(private val sp: SharedPreferences) {
         }
 
         const val DEFAULT_FONT_SIZE_SP = 14f
+        const val DEFAULT_FONT_FAMILY = com.readit.core.text.Fonts.ID_DEFAULT
         const val DEFAULT_LINE_SPACING = 1.3f
         const val DEFAULT_MARGIN_DP = 12
         const val DEFAULT_WEBDAV_DIR = "/ReadIt"
+
+        /** 自动同步默认开启；配合「仅非计费网络」约束，默认行为是低打扰的 */
+        const val DEFAULT_SYNC_AUTO = true
     }
 
     var perfTier: PerfTier
@@ -61,8 +74,19 @@ class ReadItPrefs(private val sp: SharedPreferences) {
         set(v) = sp.edit().putString(K_REFRESH_MODE, v.key).apply()
 
     var fontSizeSp: Float
-        get() = sp.getFloat(K_FONT_SIZE_SP, DEFAULT_FONT_SIZE_SP)
-        set(v) = sp.edit().putFloat(K_FONT_SIZE_SP, v).apply()
+        get() = com.readit.core.text.Fonts.clampFontSizeSp(sp.getFloat(K_FONT_SIZE_SP, DEFAULT_FONT_SIZE_SP))
+        set(v) = sp.edit().putFloat(K_FONT_SIZE_SP, com.readit.core.text.Fonts.clampFontSizeSp(v)).apply()
+
+    /**
+     * 字体 id（内置 id 或 `user:<文件名>`）。
+     *
+     * 读取时只做「非空」校正——真正的「该字体还在不在」要等扫完字体目录才能判断，
+     * 由 [com.readit.core.text.UserFonts.currentId] 负责，避免每次读 prefs 都去扫盘。
+     */
+    var fontFamily: String
+        get() = sp.getString(K_FONT_FAMILY, DEFAULT_FONT_FAMILY)?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_FONT_FAMILY
+        set(v) = sp.edit().putString(K_FONT_FAMILY, v).apply()
 
     var lineSpacing: Float
         get() = sp.getFloat(K_LINE_SPACING, DEFAULT_LINE_SPACING)
@@ -76,6 +100,22 @@ class ReadItPrefs(private val sp: SharedPreferences) {
     var pdfCropEnabled: Boolean
         get() = sp.getBoolean(K_PDF_CROP, true)
         set(v) = sp.edit().putBoolean(K_PDF_CROP, v).apply()
+
+    // ---------------------------------------------------------------- 屏幕灯
+
+    /** 屏幕灯开关（仅墨水屏有意义；非墨水屏恒按「开着」处理） */
+    var lightOn: Boolean
+        get() = sp.getBoolean(K_LIGHT_ON, DEFAULT_LIGHT_ON)
+        set(v) = sp.edit().putBoolean(K_LIGHT_ON, v).apply()
+
+    /** 亮度等级 0..100 */
+    var lightLevel: Int
+        get() = sp.getInt(K_LIGHT_LEVEL, DEFAULT_LIGHT_LEVEL)
+            .coerceIn(com.readit.core.light.ScreenLight.LEVEL_MIN, com.readit.core.light.ScreenLight.LEVEL_MAX)
+        set(v) = sp.edit().putInt(
+            K_LIGHT_LEVEL,
+            v.coerceIn(com.readit.core.light.ScreenLight.LEVEL_MIN, com.readit.core.light.ScreenLight.LEVEL_MAX)
+        ).apply()
 
     // ---------------------------------------------------------------- 扫描版检测（F08）
 
@@ -129,6 +169,51 @@ class ReadItPrefs(private val sp: SharedPreferences) {
     fun isForceImport(bookId: String): Boolean =
         sp.getBoolean(K_FORCE_IMPORT_PREFIX + bookId, false)
 
+    // ---------------------------------------------------------------- 编码（F15）
+
+    /**
+     * 用户为该书手动选定的编码名；null = 没选过，走自动检测。
+     *
+     * 按书记忆而不是全局默认值：阅读主体是 GBK 时代的中文 TXT，同一台设备上
+     * 不同来源的书编码并不一致，全局默认值反而会制造新的乱码。
+     */
+    fun charsetFor(bookId: String): String? = sp.getString(K_CHARSET_PREFIX + bookId, null)
+
+    fun setCharsetFor(bookId: String, name: String?) =
+        sp.edit().apply { if (name == null) remove(K_CHARSET_PREFIX + bookId) else putString(K_CHARSET_PREFIX + bookId, name) }
+            .apply()
+
+    // ---------------------------------------------------------------- 按书记忆的搬家（重命名 / 删除）
+
+    /**
+     * 书籍被重命名：把它的按书记忆从旧书名搬到新书名。
+     *
+     * 必须搬的理由：`bookId` 就是文件名（`ReaderActivity` 里 `bookId = file.name`）。
+     * 只改文件不搬记忆，用户重命名一本书之后就会「进度归零 + 编码回落到自动检测」，
+     * 而这两件事都不会报错 —— 典型静默数据丢失。
+     */
+    fun moveBookPrefs(fromId: String, toId: String) {
+        if (fromId == toId) return
+        val e = sp.edit()
+        sp.getString(K_CHARSET_PREFIX + fromId, null)?.let {
+            e.remove(K_CHARSET_PREFIX + fromId)
+            e.putString(K_CHARSET_PREFIX + toId, it)
+        }
+        if (sp.getBoolean(K_FORCE_IMPORT_PREFIX + fromId, false)) {
+            e.remove(K_FORCE_IMPORT_PREFIX + fromId)
+            e.putBoolean(K_FORCE_IMPORT_PREFIX + toId, true)
+        }
+        e.apply()
+    }
+
+    /** 书籍被删除：清掉它的按书记忆，否则同名新书会继承旧书的编码 / 强制导入标记 */
+    fun clearBookPrefs(bookId: String) {
+        sp.edit()
+            .remove(K_CHARSET_PREFIX + bookId)
+            .remove(K_FORCE_IMPORT_PREFIX + bookId)
+            .apply()
+    }
+
     // ---------------------------------------------------------------- WebDAV（F13）
 
     var webDavUrl: String
@@ -154,6 +239,14 @@ class ReadItPrefs(private val sp: SharedPreferences) {
     /** 三项必填齐全才允许发起同步 */
     val webDavConfigured: Boolean
         get() = webDavUrl.isNotBlank() && webDavUser.isNotBlank()
+
+    /**
+     * 自动同步开关（未闭环项 A1）。默认开启，但要三个条件同时成立才真挂任务：
+     * 档位支持（API23+）、开关打开、WebDAV 已配置；且调度时额外限定「仅非计费网络」。
+     */
+    var syncAutoEnabled: Boolean
+        get() = sp.getBoolean(K_SYNC_AUTO, DEFAULT_SYNC_AUTO)
+        set(v) = sp.edit().putBoolean(K_SYNC_AUTO, v).apply()
 
     /** 按键学习向导产出的映射：KeyCode -> action */
     fun putKeyMap(keyCode: Int, action: String) =

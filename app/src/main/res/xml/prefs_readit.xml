@@ -29,6 +29,26 @@
             app:title="@string/pref_device_profile_import" />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="@string/cat_typography">
+        <SeekBarPreference
+            app:defaultValue="14"
+            app:key="font_size"
+            app:showSeekBarValue="true"
+            app:title="@string/pref_font_size" />
+
+        <!-- 条目动态拼（用户字体随时可增删），summary 由 useSimpleSummaryProvider 显示当前项 -->
+        <ListPreference
+            app:defaultValue="default"
+            app:key="font_family"
+            app:title="@string/pref_font_family"
+            app:useSimpleSummaryProvider="true" />
+
+        <Preference
+            app:key="font_dir"
+            app:selectable="false"
+            app:title="@string/pref_font_dir" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="@string/cat_reading">
         <SwitchPreferenceCompat
             app:defaultValue="true"
@@ -51,6 +71,23 @@
             app:title="@string/pref_scan_min_chars" />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="@string/cat_light">
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:key="light_on"
+            app:summary="@string/pref_light_on_summary"
+            app:title="@string/pref_light_on" />
+
+        <SeekBarPreference
+            app:defaultValue="50"
+            app:key="light_level"
+            app:min="0"
+            app:seekBarIncrement="5"
+            app:showSeekBarValue="true"
+            app:summary="@string/pref_light_level_summary"
+            app:title="@string/pref_light_level" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="@string/cat_sync">
         <EditTextPreference
             app:key="webdav_url"
@@ -70,6 +107,17 @@
             app:key="webdav_dir"
             app:summary="@string/pref_webdav_dir_summary"
             app:title="@string/pref_webdav_dir" />
+
+        <SwitchPreferenceCompat
+            app:defaultValue="true"
+            app:key="sync_auto"
+            app:summary="@string/pref_sync_auto_summary"
+            app:title="@string/pref_sync_auto" />
+
+        <Preference
+            app:key="sync_strategy"
+            app:selectable="false"
+            app:title="@string/pref_sync_strategy" />
 
         <Preference
             app:key="sync_now"

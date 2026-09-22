@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.View
 import com.readit.core.util.ReadItLog
@@ -28,6 +29,17 @@ class TxtCanvasView @JvmOverloads constructor(
             if (field != value) {
                 field = value
                 paint.textSize = value * resources.displayMetrics.scaledDensity
+                rebuild()
+                invalidate()
+            }
+        }
+
+    /** 字体（null = 系统默认）。换字体必须重排：字形宽度变了，每页行数和每行列数都会变。 */
+    var typeface: Typeface? = null
+        set(value) {
+            if (field !== value) {
+                field = value
+                paint.typeface = value
                 rebuild()
                 invalidate()
             }
@@ -147,7 +159,12 @@ class TxtCanvasView @JvmOverloads constructor(
         val marginPx = marginDp * density
         val maxWidth = (width - 2 * marginPx).coerceAtLeast(density * 40)
         val fm = paint.fontMetrics
-        val lineHeight = (fm.bottom - fm.top) + (fm.leading) * 0f + (fm.descent - fm.ascent) * (lineSpacing - 1f)
+        // 行高必须用 ascent/descent（hhea，稳定在 1em 上下），不能用 fm.top/bottom：
+        // 后者来自 OS/2，CJK 字体为了容纳全角/竖排字形会给到 3em 以上 —— 换上内置思源宋体后
+        // 实测行高被算成 ~120px，一页只剩 2 行。这里与 onDraw() 的行距口径也统一了
+        // （以前两处公式不同，分页和绘制会算出不同的行高）。
+        val lineHeight = ((fm.descent - fm.ascent) * lineSpacing)
+            .coerceIn(paint.textSize, paint.textSize * 3f)
         val usable = (height - 2 * marginPx).coerceAtLeast(lineHeight)
 
         // 中文字符宽度作为基准（中英混排时偏保守，避免溢出）。

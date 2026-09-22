@@ -2,6 +2,7 @@ package com.readit.ui.settings
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -13,8 +14,12 @@ import androidx.preference.EditTextPreference
 import androidx.preference.ListPreference
 import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
+import androidx.preference.SeekBarPreference
 import androidx.preference.SwitchPreferenceCompat
 import com.readit.core.eal.DeviceRepository
+import com.readit.core.light.ScreenLight
+import com.readit.core.text.Fonts
+import com.readit.core.text.UserFonts
 import com.readit.core.eal.Eal
 import com.readit.core.eal.PerfTier
 import com.readit.core.eal.RefreshMode
@@ -27,6 +32,8 @@ import com.readit.data.storage.StorageManager
 import com.readit.eink.BuildConfig
 import com.readit.eink.R
 import com.readit.eink.ui.MainActivity
+import com.readit.sync.SyncCapability
+import com.readit.sync.SyncScheduler
 import com.readit.sync.SyncStateStore
 import com.readit.sync.WebDavSync
 import com.readit.sync.webdav.DavUrl
@@ -59,6 +66,14 @@ class SettingsActivity : AppCompatActivity() {
         private val io = Executors.newSingleThreadExecutor()
         private val main = Handler(Looper.getMainLooper())
         private var syncing = false
+
+        /**
+         * API 33+ 的前台服务通知需要 POST_NOTIFICATIONS 运行时授权。
+         * 被拒也不影响同步执行（前台服务照跑），只是通知不可见，
+         * 所以回调里不做任何提示，避免给用户「必须授权」的压力。
+         */
+        private val askNotifications =
+            registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
         /** 设备配置导入（F18）：SAF 选 JSON → [DeviceRepository.importProfiles] */
         private val pickProfileJson =
@@ -93,7 +108,9 @@ class SettingsActivity : AppCompatActivity() {
 
             bindStorage(prefs)
             bindPerformance(prefs)
+            bindTypography(prefs)
             bindReading(prefs)
+            bindLight(prefs)
             bindSync(prefs)
             bindBackup()
             bindInput()
@@ -256,6 +273,94 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
+        // ------------------------------------------------------------ 屏幕灯
+
+        /**
+         * 屏幕灯（开关 + 亮度等级）。
+         *
+         * 非墨水屏设备**只给亮度**：屏幕的亮灭归系统管，App 里塞一个「关灯」只会让人困惑
+         * （而且窗口亮度 0 在普通屏上就是纯黑，看着像死机）。开关项直接 `isVisible = false`。
+         */
+        private fun bindLight(prefs: ReadItPrefs) {
+            val canToggle = ScreenLight.canToggle(requireContext())
+            val eink = ScreenLight.isEink(requireContext())
+
+            findPreference<SwitchPreferenceCompat>("light_on")?.let { p ->
+                p.isVisible = canToggle
+                p.isChecked = prefs.lightOn
+                p.setOnPreferenceChangeListener { _, v ->
+                    prefs.lightOn = v as? Boolean ?: true
+                    ScreenLight.setOn(requireContext(), prefs.lightOn)
+                    ScreenLight.applyToWindow(activity?.window, prefs.lightOn, prefs.lightLevel)
+                    true
+                }
+            }
+
+            findPreference<SeekBarPreference>("light_level")?.let { p ->
+                // max/min/step 走代码设置：androidx.preference 的 max 是 android:max，
+                // 本文件根节点未声明 android 命名空间，写 XML 会 AAPT 报 attribute not found。
+                p.max = ScreenLight.LEVEL_MAX
+                p.min = ScreenLight.LEVEL_MIN
+                p.seekBarIncrement = ScreenLight.LEVEL_STEP
+                p.value = prefs.lightLevel
+                p.summary = if (eink) {
+                    getString(R.string.pref_light_level_summary)
+                } else {
+                    getString(R.string.light_brightness_only)
+                }
+                p.setOnPreferenceChangeListener { _, v ->
+                    val level = (v as? Int) ?: prefs.lightLevel
+                    prefs.lightLevel = level
+                    ScreenLight.setLevel(requireContext(), level)
+                    ScreenLight.applyToWindow(
+                        activity?.window,
+                        ScreenLight.isOn(requireContext(), prefs.lightOn),
+                        level
+                    )
+                    true
+                }
+            }
+        }
+
+        // ------------------------------------------------------------ 字体与排版
+
+        private fun bindTypography(prefs: ReadItPrefs) {
+            // 字号：10–20sp。max/min/step 走代码设置（SeekBarPreference 的 max 是 android:max，
+            // 本文件根节点未声明 android 命名空间，写 XML 会 AAPT 报错——同屏幕灯亮度那处）。
+            findPreference<SeekBarPreference>("font_size")?.let { p ->
+                p.min = Fonts.MIN_FONT_SP.toInt()
+                p.max = Fonts.MAX_FONT_SP.toInt()
+                p.seekBarIncrement = 1
+                p.value = prefs.fontSizeSp.toInt()
+                p.summary = getString(R.string.pref_font_size_summary, p.value)
+                p.setOnPreferenceChangeListener { _, v ->
+                    prefs.fontSizeSp = (v as? Int)?.toFloat() ?: prefs.fontSizeSp
+                    p.summary = getString(R.string.pref_font_size_summary, prefs.fontSizeSp.toInt())
+                    true
+                }
+            }
+
+            val userFonts = UserFonts.scan(requireContext())
+            val ids = Fonts.builtinIds() + userFonts.map { it.id }
+            val labels = resources.getStringArray(R.array.font_builtin_labels).toMutableList()
+            userFonts.forEach { labels.add(getString(R.string.font_user_label, it.displayName())) }
+
+            // 列表项必须动态拼：用户字体随时可能增删，写死在 XML 里会与磁盘不一致
+            findPreference<ListPreference>("font_family")?.let { p ->
+                p.entries = labels.toTypedArray()
+                p.entryValues = ids.toTypedArray()
+                p.value = UserFonts.currentId(requireContext())
+                p.setOnPreferenceChangeListener { _, v ->
+                    prefs.fontFamily = Fonts.sanitize(v as? String, ids)
+                    true
+                }
+            }
+
+            findPreference<Preference>("font_dir")?.let { p ->
+                p.summary = getString(R.string.pref_font_dir_summary, UserFonts.dirLabel(requireContext()))
+            }
+        }
+
         // ------------------------------------------------------------ WebDAV
 
         private fun bindSync(prefs: ReadItPrefs) {
@@ -273,12 +378,17 @@ class SettingsActivity : AppCompatActivity() {
                             toast(getString(R.string.sync_cleartext_warning))
                         else -> Unit
                     }
+                    SyncScheduler.apply(requireContext())
                     false
                 }
             }
             findPreference<EditTextPreference>("webdav_user")?.let {
                 it.text = prefs.webDavUser
-                it.setOnPreferenceChangeListener { _, v -> prefs.webDavUser = v as? String ?: ""; true }
+                it.setOnPreferenceChangeListener { _, v ->
+                    prefs.webDavUser = v as? String ?: ""
+                    SyncScheduler.apply(requireContext())
+                    true
+                }
             }
             findPreference<EditTextPreference>("webdav_password")?.let {
                 it.text = prefs.webDavPassword
@@ -304,6 +414,33 @@ class SettingsActivity : AppCompatActivity() {
                 SyncStateStore.clear(requireContext())
                 toast(getString(R.string.sync_reset_done))
                 true
+            }
+
+            // ---------------------------------------------------- 自动同步（§2.3 A1）
+            findPreference<SwitchPreferenceCompat>("sync_auto")?.let { p ->
+                p.isChecked = prefs.syncAutoEnabled
+                p.setOnPreferenceChangeListener { _, v ->
+                    val on = v as? Boolean ?: false
+                    prefs.syncAutoEnabled = on
+                    SyncScheduler.apply(requireContext())
+                    if (on && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                    toast(getString(if (on) R.string.sync_auto_on else R.string.sync_auto_off))
+                    true
+                }
+            }
+
+            findPreference<Preference>("sync_strategy")?.let { p ->
+                val api = Build.VERSION.SDK_INT
+                p.summary = when (SyncCapability.modeOf(api)) {
+                    SyncCapability.Mode.MANUAL_ONLY ->
+                        getString(R.string.sync_strategy_manual, api)
+                    SyncCapability.Mode.BACKGROUND ->
+                        getString(R.string.sync_strategy_bg, api, SyncCapability.intervalHours(api))
+                    SyncCapability.Mode.FOREGROUND ->
+                        getString(R.string.sync_strategy_fg, api, SyncCapability.intervalHours(api))
+                }
             }
         }
 

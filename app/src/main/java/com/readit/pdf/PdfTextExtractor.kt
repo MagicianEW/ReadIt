@@ -139,39 +139,59 @@ class PdfTextExtractor {
      *  平均每页文本字符数 &lt; thresholds.minCharsPerPage
      *  且 含整页大图的采样页占比 ≥ thresholds.minImagePageRatio
      *
+     * **会早退**：累计字符一旦 ≥ `minCharsPerPage × 采样页数`，「非扫描」就已经被证明，
+     * 立刻停止抽页 —— 结论与抽满页数完全一致，只是不用等（§9.4 的 PDF 首屏 P1）。
+     *
      * 只保证「大概率」，不承诺 100%；调用方必须提供「强制导入」入口。
      */
     fun detectScan(thresholds: ScanThresholds = ScanThresholds.DEFAULT): ScanVerdict {
+        val t0 = System.nanoTime()
         val t = thresholds.sanitized()
         val doc = document
-            ?: return ScanVerdict(false, 0, 0f, 0f, 0f, "document not opened")
+            ?: return ScanVerdict(false, 0, 0f, 0f, 0f, "document not opened", (System.nanoTime() - t0) / 1_000_000)
         val total = doc.numberOfPages
-        if (total == 0) return ScanVerdict(false, 0, 0f, 0f, 0f, "empty document")
+        if (total == 0) return ScanVerdict(false, 0, 0f, 0f, 0f, "empty document", (System.nanoTime() - t0) / 1_000_000)
 
         val samples = sampleIndices(total, t.samplePages)
-        var chars = 0
+        val planned = samples.size
+
+        // —— 早退：判定是 scanned = lowText && enoughImages，而 lowText 只看「累计字符 < 阈值×页数」。
+        // 累计字符一旦达标，lowText 已为假、scanned 必为假 —— 剩下的页抽了也不会改变结论。
+        // 这是等价推理，不是"少采样"的近似：结论与抽满 planned 页完全一致，
+        // 省掉的是纯等待（§9.4 实测文本 PDF 冷启动 detectScan 5793ms -> 约 3.3s）。
+        // 反过来说，扫描件抽不出文本、`chars` 上不去，这里不会早退，仍按 planned 页判 ——
+        // 「文本文档中间插一整页图版」那类异质文档因此不会被误判（见 ScanSamplePageTradeoffTest）。
+        val enoughChars = t.minCharsPerPage.toLong() * planned
+
+        var chars = 0L
         var imagePages = 0
         var maxAreaRatio = 0f
+        var examined = 0
 
         for (i in samples) {
             chars += extractPage(i).trim().length
             val ratio = biggestImageAreaRatio(doc, i)
             if (ratio >= t.minImageAreaRatio) imagePages++
             if (ratio > maxAreaRatio) maxAreaRatio = ratio
+            examined++
+            if (chars >= enoughChars) break
         }
 
-        val avgChars = chars.toFloat() / samples.size
-        val imageRatio = imagePages.toFloat() / samples.size
-        val lowText = avgChars < t.minCharsPerPage
+        val avgChars = chars.toFloat() / examined
+        val imageRatio = imagePages.toFloat() / examined
+        val lowText = chars < enoughChars
         val enoughImages = imageRatio >= t.minImagePageRatio
         val scanned = lowText && enoughImages
+        val earlyExit = examined < planned
 
         val reason = when {
+            earlyExit -> "text layer present, stopped after $examined/$planned pages (>=${t.minCharsPerPage} chars/page)"
             scanned -> "low text (${"%.0f".format(avgChars)}<${t.minCharsPerPage}) + full-page images (${"%.2f".format(imageRatio)})"
             !lowText -> "text layer present (${"%.0f".format(avgChars)} chars/page)"
             else -> "low text but no full-page image (${"%.2f".format(imageRatio)})"
         }
-        val verdict = ScanVerdict(scanned, samples.size, avgChars, imageRatio, maxAreaRatio, reason)
+        val costMs = (System.nanoTime() - t0) / 1_000_000
+        val verdict = ScanVerdict(scanned, examined, avgChars, imageRatio, maxAreaRatio, reason, costMs, earlyExit)
         ReadItLog.i("scan detect: ${verdict.describe()}")
         return verdict
     }

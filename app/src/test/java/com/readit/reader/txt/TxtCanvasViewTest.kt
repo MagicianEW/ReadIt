@@ -41,6 +41,13 @@ class TxtCanvasViewTest {
         return sb.toString()
     }
 
+    /**
+     * 用**项目口径的小屏**（480×800，E-Ink 兜底尺寸）而不是 1080×2039。
+     *
+     * Robolectric 底下没有真实字形，Paint 的字体度量是 stub 值，每页容量会离谱地大；
+     * 用大屏时整篇 12 万字会装进 1 页，「恢复到非首页」这类断言就永远测不出来
+     * （曾经靠旧行高公式碰巧成立，行高一改就露馅）。小屏能把容量压回十几页量级。
+     */
     private fun layerOut(v: View, w: Int, h: Int) {
         v.measure(
             View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY),
@@ -48,6 +55,8 @@ class TxtCanvasViewTest {
         )
         v.layout(0, 0, w, h)
     }
+
+    private fun layerOutSmall(v: View) = layerOut(v, 480, 800)
 
     @Test
     fun `start offset survives being applied before the first layout`() {
@@ -63,7 +72,7 @@ class TxtCanvasViewTest {
         assertEquals(0, v.currentPage())
 
         // 2) 首次布局：挂起的偏移必须在这里被消费
-        layerOut(v, 1080, 2039)
+        layerOutSmall(v)
 
         assertTrue(
             "布局后应真正分页（>1 页）pages=${v.totalPages()} width=${v.width} height=${v.height}",
@@ -85,7 +94,7 @@ class TxtCanvasViewTest {
     fun `offset zero still lands on the first page`() {
         val v = TxtCanvasView(ctx)
         v.setDocument(longText(60_000), startOffset = 0)
-        layerOut(v, 1080, 2039)
+        layerOutSmall(v)
         assertEquals(0, v.currentPage())
         assertEquals(0, v.currentOffset())
     }
@@ -96,13 +105,13 @@ class TxtCanvasViewTest {
         val target = (text.length * 9) / 10
         val v = TxtCanvasView(ctx)
         v.setDocument(text, startOffset = target)
-        layerOut(v, 1080, 2039)
+        layerOutSmall(v)
         assertTrue("前置条件：应恢复到非首页", v.currentPage() > 0)
         assertTrue(v.currentOffset() > 0)
 
         // 改字号会触发重新分页（等价于 rebuild()）
         v.fontSizeSp = 22f
-        layerOut(v, 1080, 2039)
+        layerOutSmall(v)
 
         assertTrue(
             "重新分页后不应回到第 0 页 page=${v.currentPage()} offset=${v.currentOffset()}",

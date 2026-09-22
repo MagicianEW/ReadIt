@@ -8,10 +8,13 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.SeekBar
+import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -20,11 +23,18 @@ import androidx.core.view.GravityCompat
 import androidx.drawerlayout.widget.DrawerLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import android.os.Handler
+import android.os.Looper
 import com.readit.core.eal.Eal
 import com.readit.core.eal.RefreshModeManager
+import com.readit.core.light.LightGesture
+import com.readit.core.light.ScreenLight
 import com.readit.core.input.InputMapper
 import com.readit.core.text.ChapterDetector
+import com.readit.core.text.Fonts
+import com.readit.core.text.UserFonts
 import com.readit.core.text.EncodingDetector
+import com.readit.core.util.Metrics
 import com.readit.core.util.ReadItLog
 import com.readit.data.ProgressPolicy
 import com.readit.data.ProgressStore
@@ -75,6 +85,19 @@ class ReaderActivity : AppCompatActivity() {
     private lateinit var tocList: RecyclerView
     private lateinit var pageInfo: TextView
     private lateinit var panel: LinearLayout
+    private lateinit var fontSpinner: Spinner
+    private lateinit var btnEncoding: Button
+
+    /** 当前打开的文件；改编码要按它重读，不能只靠 onCreate 的局部变量 */
+    private lateinit var bookFile: File
+    private var fontIds: List<String> = Fonts.builtinIds()
+
+    /**
+     * Spinner 的 `onItemSelected` 在 `setAdapter()` 后会被立刻回调一次（position 0），
+     * 随后 `setSelection()` 再回调真正的当前项。不设闸的话，打开面板这一下就会把字体
+     * 改成列表第一项——用户只是想看看，结果字体被悄悄改了。
+     */
+    private var fontSpinnerReady = false
     private lateinit var prefs: ReadItPrefs
 
     private val io = Executors.newSingleThreadExecutor()
@@ -82,8 +105,13 @@ class ReaderActivity : AppCompatActivity() {
     private var entries: List<TocEntry> = emptyList()
     private var bookId: String = ""
     private var mode = ReadMode.TXT
+
+    /** 当前 DOCX 的转换产物目录：打包字体要拷到这里才能被 @font-face 的相对路径命中 */
+    private var docxBaseDir: File? = null
     private var downX = 0f
     private var downY = 0f
+    private var downStageX = 0f
+    private var downStageY = 0f
 
     /**
      * 触摸接管判定（P5 真机冒烟修复）。
@@ -95,6 +123,88 @@ class ReaderActivity : AppCompatActivity() {
     private var downInStage = false
     private val stageRect = Rect()
     private val stageLoc = IntArray(2)
+
+    // ---------------------------------------------------------------- §7 指标埋点
+
+    /** 打开动作的起点，用于「首帧 / 首屏」类指标 */
+    private var openStartedAt = 0L
+
+    /** 一次用户导航（翻页 / 目录跳转）的起点，页面回调时结算后清零 */
+    private var navStartedAt = 0L
+
+    /**
+     * 本次导航是不是「目录跳转」。
+     *
+     * 自绘画布只有「页面已可见」这一个回调，翻页与跳转走的是同一条结算路径；
+     * 不带这个标记的话，目录跳转会被记成 `pageTurn`，`tocJump` 永久缺失
+     * （EPD106 实测：TXT 目录跳转打出的是 `pageTurn file=chapter_long.txt ms=10`）。
+     */
+    private var navIsTocJump = false
+
+    /**
+     * 本次打开最终要展示的视图，由 [showOnly] 记录。
+     *
+     * 为什么要这东西：Activity 是「一本书一个实例」，但视图回调不是——打开 PDF 时
+     * 自绘画布还没设过文档，仅因为一次布局就会回调 `onPageChanged(0, 1)`，被
+     * [notePageShown] 当成「首帧」结算掉。实测（EPD106）：打开 real_text.pdf 打出
+     * `metrics: firstFrame file=real_text.pdf mode=TXT ms=205`——mode 还是上一个
+     * 实例遗留的 TXT，205ms 是空画布的假数字，而 Pdfium 真正的首屏**永远不再记录**
+     * （`firstFrameLogged` 已被假样本吃掉）。只认「当前打开路径指定的那个视图」即可根治。
+     */
+    private var pendingView: View? = null
+
+    private var firstFrameLogged = false
+
+    /**
+     * 页面已可见。
+     *
+     * 首次回调 = 「首帧」，之后若处在一次导航里 = 「翻页 / 跳转耗时」。
+     * 自绘画布（TXT / DOCX_TEXT / EPUB_TEXT / PDF_TEXT）与 Pdfium 渲染档共用这一处，
+     * 因为两者都只有在页面真的显示出来时才回调。
+     *
+     * [src] 必须是本次打开路径指定的视图（见 [pendingView]），否则一律忽略：
+     * 空画布的布局回调、上一次打开的视图的余波都不算「页面已可见」。
+     */
+    private fun notePageShown(src: View) {
+        if (src !== pendingView) {
+            ReadItLog.d("page shown ignored: src=${src.javaClass.simpleName} pending=${pendingView?.javaClass?.simpleName}")
+            return
+        }
+        if (!firstFrameLogged && openStartedAt > 0L) {
+            firstFrameLogged = true
+            Metrics.logFirstFrame(bookId, mode.name, openStartedAt)
+            return
+        }
+        if (navStartedAt > 0L) {
+            logNav(navStartedAt)
+            navStartedAt = 0L
+        }
+    }
+
+    /**
+     * 按发起方结算一次导航耗时：目录跳转记 `tocJump`，翻页记 `pageTurn`。
+     *
+     * 两条 WebView 路径（EPUB_FULL / DOCX_HTML）没有页面回调，由发起处直接调用。
+     */
+    private fun logNav(startedAt: Long) {
+        if (navIsTocJump) Metrics.logTocJump(bookId, mode.name, startedAt)
+        else Metrics.logPageTurn(bookId, mode.name, startedAt)
+    }
+
+    /** 用户发起一次导航的起点；[tocJump] 区分目录跳转与翻页，决定结算时记哪条指标 */
+    private fun beginNav(tocJump: Boolean = false) {
+        navStartedAt = Metrics.now()
+        navIsTocJump = tocJump
+    }
+
+    // 屏幕灯手势状态（详见 lightGesture* 一组方法）
+    private val lightHandler = Handler(Looper.getMainLooper())
+    private var lightLongPress: Runnable? = null
+    private var lightLongPressFired = false
+    private var lightSwipeConsumed = false
+    private var lightSwipeBaseLevel = 0
+    private var lightSwipeSteps = 0
+    private var lightSwipeDirty = false
 
     /** 把 stage 的真实屏幕矩形同步到 [stageRect]，并在 [stageLoc] 留下左上角屏幕坐标 */
     private fun syncStageRect() {
@@ -136,6 +246,10 @@ class ReaderActivity : AppCompatActivity() {
         }
         val file = File(path)
         bookId = file.name
+        bookFile = file
+        // §7 的四个时限都以「打开动作」为起点，必须在任何 open* 之前取
+        openStartedAt = Metrics.now()
+        btnEncoding = findViewById(R.id.btnEncoding)
 
         // 目录宽度 90vw（600×800 兜底口径）
         val tocWidth = (resources.displayMetrics.widthPixels * 0.9f).toInt()
@@ -143,15 +257,23 @@ class ReaderActivity : AppCompatActivity() {
         tocList.layoutManager = LinearLayoutManager(this)
         tocList.adapter = tocAdapter
 
+        // 屏幕灯：把持久化的开关/亮度作用到当前窗口（首次进入也生效）
+        restoreLight()
+
         canvas.fontSizeSp = prefs.fontSizeSp
         canvas.lineSpacing = prefs.lineSpacing
         canvas.marginDp = prefs.marginDp
+        val openTf = UserFonts.typefaceFor(this, fontId())
+        canvas.typeface = openTf
+        ReadItLog.i("font at open: id=${fontId()} typeface=${openTf ?: "null(keep default)"}")
         canvas.onPageChanged = { index, total ->
             // TalkBack 读不到自绘正文（见 R18 结论），至少给出可定位的方位信息
             canvas.contentDescription = getString(R.string.a11y_canvas, index + 1, total)
             if (mode != ReadMode.EPUB_FULL && mode != ReadMode.PDF_RENDER && mode != ReadMode.DOCX_HTML) {
                 pageInfo.text = getString(R.string.page_info, index + 1, total)
             }
+            // TXT / DOCX_TEXT / EPUB_TEXT / PDF_TEXT 都走自绘画布，页面回调即「已可见」
+            notePageShown(canvas)
         }
 
         val saved = ProgressStore.load(this, bookId)
@@ -170,6 +292,7 @@ class ReaderActivity : AppCompatActivity() {
                 return
             }
         }
+        syncEncodingButton()
 
         findViewById<Button>(R.id.btnToc).setOnClickListener {
             if (entries.isEmpty()) {
@@ -179,7 +302,15 @@ class ReaderActivity : AppCompatActivity() {
             }
         }
         findViewById<Button>(R.id.btnTypography).setOnClickListener {
+            if (panel.visibility != View.VISIBLE) {
+                // 每次展开都重扫一次字体目录：用户可能刚把 .ttf 丢进去
+                refreshFontOptions()
+            }
             panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+        }
+        // F15 常驻入口：随时改编码，不依赖自动检测是否猜错
+        findViewById<Button>(R.id.btnEncoding).setOnClickListener {
+            if (::bookFile.isInitialized) askEncoding(bookFile, currentTextPosition())
         }
         findViewById<Button>(R.id.btnRefresh).setOnClickListener {
             RefreshModeManager.requestFullRefresh(activeView())
@@ -204,6 +335,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun ensureDocxView(): DocxWebView {
         docxView?.let { return it }
         val v = DocxWebView(this)
+        v.onLoaded = { notePageShown(v) }
         stage.addView(v, fullStageParams())
         docxView = v
         return v
@@ -224,26 +356,124 @@ class ReaderActivity : AppCompatActivity() {
 
     /** 只让当前路径的视图可见，避免 WebView / 位图视图在后台白白占内存 */
     private fun showOnly(target: View?) {
+        // 同时声明「本次打开指定的视图」：只有它的回调才算页面已可见（见 notePageShown）
+        pendingView = target
+        // 也让按钮显隐跟上 mode。原先只在 onCreate（此时 mode 还是默认 TXT）与展开排版面板时
+        // 同步，结果 PDF_RENDER / EPUB_FULL 下「编码」按钮一直亮着（epd106 实测截图）。
+        syncEncodingButton()
         canvas.visibility = if (target === canvas) View.VISIBLE else View.GONE
         epubView?.visibility = if (target === epubView) View.VISIBLE else View.GONE
         docxView?.visibility = if (target === docxView) View.VISIBLE else View.GONE
         pdfView?.visibility = if (target === pdfView) View.VISIBLE else View.GONE
     }
 
+    /**
+     * F15 的编码入口只在「自绘文本」模式下有意义。
+     *
+     * EPUB_FULL / DOCX_HTML 的编码由各自的解析器负责（走 CSS/HTML meta），
+     * PDF_RENDER 只出位图——这三条路径给个编码按钮只会让人困惑。
+     */
+    private fun syncEncodingButton() {
+        val usesCanvas = when (mode) {
+            ReadMode.TXT, ReadMode.EPUB_TEXT, ReadMode.DOCX_TEXT, ReadMode.PDF_TEXT -> true
+            ReadMode.EPUB_FULL, ReadMode.DOCX_HTML, ReadMode.PDF_RENDER -> false
+        }
+        btnEncoding.visibility = if (usesCanvas) View.VISIBLE else View.GONE
+    }
+
+    /** 当前正文位置，改编码后要把用户还在这页上 */
+    private fun currentTextPosition() =
+        ReadingPosition(charOffset = if (::canvas.isInitialized) canvas.currentOffset() else 0)
+
     // ------------------------------------------------------------------ TXT
 
+    /**
+     * TXT 打开（F01 / F15）。
+     *
+     * 编码是这里唯一的变量，处理顺序是「记忆 → 自动检测 → 手动选择」：
+     *  - 用户以前为这本书选过编码 → 直接用，不再打扰；失效则清掉回退；
+     *  - 没选过 → 自动检测；检测失败或**解出来是乱码**（同样两者都要管，否则
+     *    `MANUAL_CANDIDATES` 永远没人调用）→ 弹手动选择列表。
+     */
     private fun openTxt(file: File, saved: ReadingPosition?) {
         mode = ReadMode.TXT
         showOnly(canvas)
 
-        val text = loadText(file)
+        val remembered = prefs.charsetFor(bookId)
+        if (remembered != null) {
+            try {
+                applyTxtContent(file, EncodingDetector.readWith(file, remembered), saved, remembered)
+                return
+            } catch (e: Exception) {
+                // 记忆失效（书被换掉、编码名不被平台支持）→ 清掉，回退到自动检测
+                ReadItLog.w("remembered charset unusable: $remembered ${e.message}")
+                prefs.setCharsetFor(bookId, null)
+            }
+        }
+
+        val detected = EncodingDetector.detect(file)
+        val text = tryRead(file, detected?.name())
+        applyTxtContent(file, text ?: "", saved, detected?.name())
+        if (text == null || EncodingDetector.looksGarbled(text)) askEncoding(file, saved)
+    }
+
+    /** 按指定编码整本读取；失败返回 null（不打扰用户，由调用方决定何时提示） */
+    private fun tryRead(file: File, charsetName: String?): String? = try {
+        EncodingDetector.readWith(file, charsetName ?: "UTF-8")
+    } catch (e: Exception) {
+        ReadItLog.w("read failed with ${charsetName ?: "UTF-8"}: ${e.message}")
+        null
+    }
+
+    /** 把文本交给画布。 `charsetName` 为 null 表示本次是自动检测结果。 */
+    private fun applyTxtContent(
+        file: File,
+        text: String,
+        saved: ReadingPosition?,
+        charsetName: String?
+    ) {
         val chapters = ChapterDetector.detect(text).takeIf { ChapterDetector.isReliable(it, text.length) }
             ?: emptyList()
         entries = chapters.map { TocEntry(title = it.title, depth = 0, offset = it.startOffset) }
         tocAdapter.submit(entries)
 
         canvas.setDocument(text, saved?.charOffset ?: 0)
-        ReadItLog.i("open txt: ${file.name} chars=${text.length} chapters=${entries.size}")
+        ReadItLog.i(
+            "open txt: ${file.name} chars=${text.length} chapters=${entries.size} " +
+                "charset=${charsetName ?: "auto"}"
+        )
+        RefreshModeManager.requestFullRefresh(canvas)
+    }
+
+    /**
+     * F15 手动选择编码。
+     *
+     * 选完先验证：仍乱码就再弹一次让用户继续试（中文书常见的 GBK/GB18030/BIG5
+     * 互相之间肉眼难分，一次选中率不高）；验证通过才写进 prefs，避免把一次
+     * 误操作固化成永久乱码。
+     */
+    private fun askEncoding(file: File, saved: ReadingPosition?) {
+        val items = EncodingDetector.MANUAL_CANDIDATES.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.encoding_pick_title)
+            .setItems(items) { _, which ->
+                val name = items[which]
+                val text = tryRead(file, name)
+                when {
+                    text == null -> toast(getString(R.string.read_failed))
+                    EncodingDetector.looksGarbled(text) -> {
+                        toast(getString(R.string.encoding_still_garbled, name))
+                        askEncoding(file, saved)
+                    }
+                    else -> {
+                        prefs.setCharsetFor(bookId, name)
+                        applyTxtContent(file, text, saved, name)
+                        toast(getString(R.string.encoding_applied, name))
+                    }
+                }
+            }
+            .setNegativeButton(R.string.action_cancel, null)
+            .show()
     }
 
     // ------------------------------------------------------------------ EPUB
@@ -291,6 +521,7 @@ class ReaderActivity : AppCompatActivity() {
             override fun onRendered(href: String, elapsedMs: Long) {
                 // 每次章节渲染都会回调，日志按「本次渲染耗时」表述（不是"首章"）
                 ReadItLog.i("epub chapter rendered in ${elapsedMs}ms href=$href")
+                notePageShown(ev)
                 RefreshModeManager.requestFullRefresh(ev)
             }
 
@@ -312,7 +543,7 @@ class ReaderActivity : AppCompatActivity() {
             }
         }
         Toast.makeText(this, getString(R.string.epub_opening), Toast.LENGTH_SHORT).show()
-        ev.open(file, saved?.cfi, fontPercent())
+        ev.open(file, saved?.cfi, fontPercent(), Fonts.cssFamily(fontId()))
     }
 
     private fun openEpubText(file: File, book: EpubParser.Book, saved: ReadingPosition?) {
@@ -409,6 +640,8 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         lastDocxHeading = (saved?.chapterIndex ?: 0).coerceAtLeast(0)
+        docxBaseDir = converted.baseDir
+        dv.setFontFamily(Fonts.cssFamily(fontId()), docxFontFaceSrc(converted.baseDir))
         dv.load(html, converted.baseDir)
         // 就绪判定在 DocxWebView 内部（onPageFinished 之前会挂起），这里直接调用即可。
         // 早期版本用 dv.post{} 抢在 onPageFinished 之前就 evaluateJavascript，
@@ -502,13 +735,18 @@ class ReaderActivity : AppCompatActivity() {
         pv.cropEnabled = prefs.pdfCropEnabled
         pv.cachePages = strategy.pdfCachedPages
         pdfTimeoutStreak = 0
-        showOnly(pv)
+        // 先定 mode 再 showOnly：showOnly 会顺带校准编码入口显隐（见 syncEncodingButton）
         mode = ReadMode.PDF_RENDER
+        showOnly(pv)
 
         pv.onPageChanged = { page, total ->
             pageInfo.text = getString(R.string.page_info, page + 1, total)
         }
-        pv.onPageRendered = { pdfTimeoutStreak = 0 }
+        pv.onPageRendered = {
+            pdfTimeoutStreak = 0
+            // Pdfium 渲染档的首帧口径与自绘画布一致：页面真的回调出来了
+            notePageShown(pv)
+        }
         pv.onRenderTimeout = { page ->
             // R11：单页超时先提示、允许用户翻页绕开；连续超时说明这台机器带不动
             // Pdfium 渲染档（兜底档 SoC 上的畸形页/慢文档），整本退到文本档比一直白屏有用。
@@ -708,49 +946,124 @@ class ReaderActivity : AppCompatActivity() {
         return PdfTextExtractor(tempFileOnly = strategy.lowMemory, tempDir = cacheDir)
     }
 
-    private fun loadText(file: File): String {
-        val charset = EncodingDetector.detect(file)
-        return try {
-            if (charset != null) file.readText(charset) else file.readText(Charsets.UTF_8)
-        } catch (e: Exception) {
-            ReadItLog.e("read text failed", e)
-            Toast.makeText(this, getString(R.string.read_failed), Toast.LENGTH_LONG).show()
-            ""
-        }
-    }
-
     private fun currentChapterIndex(): Int {
         val off = canvas.currentOffset()
         return entries.indexOfLast { it.offset >= 0 && it.offset <= off }.coerceAtLeast(0)
     }
 
     private fun jumpTo(entry: TocEntry) {
-        when (mode) {
-            ReadMode.EPUB_FULL -> if (entry.spineIndex >= 0) {
-                epubView?.displaySpine(entry.spineIndex)
-            } else {
-                Toast.makeText(this, getString(R.string.toc_empty), Toast.LENGTH_SHORT).show()
-            }
-            ReadMode.PDF_RENDER -> if (entry.pageIndex >= 0) {
-                pdfView?.goToPage(entry.pageIndex)
-            } else {
-                Toast.makeText(this, getString(R.string.toc_empty), Toast.LENGTH_SHORT).show()
-            }
-            ReadMode.DOCX_HTML -> if (entry.offset >= 0) {
+        // F10 / §7：目录跳转 <500ms。自绘画布与 Pdfium 会在页面回调时自动结算，
+        // WebView 两条路径（EPUB_FULL / DOCX_HTML）没有这个回调，直接在此处收摊。
+        beginNav(tocJump = true)
+        val webLike = mode == ReadMode.EPUB_FULL || mode == ReadMode.DOCX_HTML
+        // 参数有效 + 视图就绪才真发跳转；否则只弹 toast，那种情况不该记指标，
+        // 不然 `tocJump` 里会混进一堆「0ms」的假样本。
+        fun ok(valid: Boolean, act: () -> Unit): Boolean =
+            if (valid) { act(); true } else { toastTocEmpty(); false }
+        val dispatched: Boolean = when (mode) {
+            ReadMode.EPUB_FULL ->
+                ok(entry.spineIndex >= 0 && epubView != null) { epubView?.displaySpine(entry.spineIndex) }
+            ReadMode.PDF_RENDER ->
+                ok(entry.pageIndex >= 0 && pdfView != null) { pdfView?.goToPage(entry.pageIndex) }
+            ReadMode.DOCX_HTML -> ok(entry.offset >= 0 && docxView != null) {
                 lastDocxHeading = entry.offset
                 docxView?.scrollToHeading(entry.offset)
             }
-            else -> if (entry.offset >= 0) {
-                canvas.goToOffset(entry.offset)
-            }
+            else -> ok(entry.offset >= 0) { canvas.goToOffset(entry.offset) }
         }
         drawer.closeDrawers()
         RefreshModeManager.requestFullRefresh(activeView())
+        // 自绘画布 / Pdfium 会在页面回调里结算；WebView 两条路径没有回调，就地收摊。
+        if (webLike || !dispatched) {
+            if (dispatched) logNav(navStartedAt)
+            navStartedAt = 0L
+        }
+    }
+
+    private fun toastTocEmpty() {
+        Toast.makeText(this, getString(R.string.toc_empty), Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * DOCX 的打包字体 落地点：把 asset 拷到转换产物目录，返回 CSS 侧可用的相对 URL。
+     *
+     * `loadDataWithBaseURL("file://<baseDir>/", ...)` 之后，HTML 里一切相对 URL 都以
+     * 该目录为基准——图片就是这么命中的，字体同理。系统族名没有打包文件，返回 null。
+     * 拷贝是幂等的（已存在且非空就跳过），同一本书反复打开不会反复拷贝。
+     */
+    private fun docxFontFaceSrc(baseDir: File?): String? {
+        val asset = Fonts.assetPath(fontId()) ?: return null
+        if (baseDir == null) return null
+        val dest = File(baseDir, asset)
+        return try {
+            if (!dest.exists() || dest.length() <= 0L) {
+                dest.parentFile?.mkdirs()
+                assets.open(asset).use { input ->
+                    dest.outputStream().use { out -> input.copyTo(out) }
+                }
+                ReadItLog.i("docx font staged: $asset")
+            }
+            asset
+        } catch (e: Exception) {
+            ReadItLog.w("docx font stage failed: $asset ${e.message}")
+            null
+        }
     }
 
     // ------------------------------------------------------------------ 排版
 
+    /** 当前生效字体 id（已按「字体文件还在不在」校正过） */
+    private fun fontId(): String = UserFonts.currentId(this)
+
+    /** 应用字体：TXT 换 Typeface，EPUB/DOCX 换 CSS font-family */
+    private fun applyFontFamily(id: String) {
+        prefs.fontFamily = id
+        val tf = UserFonts.typefaceFor(this, id)
+        canvas.typeface = tf
+        // 字体有没有真的拿到，肉眼看不出来（缺衬线字体的设备上 serif 会静默回退成无衬线），
+        // 只能靠日志定位：这里打实际解析结果，不是打用户选了什么。
+        ReadItLog.i("font applied: id=$id typeface=${tf ?: "null(keep default)"}")
+        val css = Fonts.cssFamily(id)
+        epubView?.setFontFamily(css)
+        docxView?.setFontFamily(css, docxFontFaceSrc(docxBaseDir))
+        RefreshModeManager.requestFullRefresh(activeView())
+    }
+
+    /** 重建字体下拉：内置 4 款 + 字体目录里扫到的 .ttf/.otf */
+    private fun refreshFontOptions() {
+        // 展开面板时顺带校准编码入口的显隐：PDF / DOCX 的异步兜底可能在这之后才定 mode
+        syncEncodingButton()
+        val userFonts = UserFonts.scan(this)
+        fontIds = Fonts.builtinIds() + userFonts.map { it.id }
+
+        val labels = ArrayList<String>(fontIds.size)
+        labels.addAll(resources.getStringArray(R.array.font_builtin_labels))
+        userFonts.forEach { labels.add(getString(R.string.font_user_label, it.displayName())) }
+
+        fontSpinner.adapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            labels
+        ).also { it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item) }
+
+        fontSpinnerReady = false
+        fontSpinner.setSelection(fontIds.indexOf(fontId()).coerceAtLeast(0))
+        fontSpinner.post { fontSpinnerReady = true }
+    }
+
     private fun bindTypographyPanel() {
+        fontSpinner = findViewById(R.id.spFontFamily)
+        refreshFontOptions()
+        fontSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                if (!fontSpinnerReady) return
+                val picked = fontIds.getOrNull(position) ?: return
+                if (picked != fontId()) applyFontFamily(picked)
+            }
+
+            override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+        }
+
         val sbFont = findViewById<SeekBar>(R.id.sbFontSize)
         val sbLine = findViewById<SeekBar>(R.id.sbLineSpacing)
         val sbMargin = findViewById<SeekBar>(R.id.sbMargin)
@@ -817,8 +1130,19 @@ class ReaderActivity : AppCompatActivity() {
                 )
                 downX = ev.x
                 downY = ev.y
+                downStageX = ev.rawX - stageLoc[0]
+                downStageY = ev.rawY - stageLoc[1]
+                lightGestureDown()
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (downInStage && lightGestureMove(ev.rawX - stageLoc[0], ev.rawY - stageLoc[1], ev.x, ev.y)) {
+                    return true
+                }
             }
             MotionEvent.ACTION_UP -> {
+                // 长按开关灯 / 竖划调亮度都算「已消费」，必须抢在翻页判定之前返回，
+                // 否则长按抬起时会被当成一次点击 → 误翻到上一页。
+                if (downInStage && lightGestureUp()) return true
                 if (downInStage) {
                     val dx = ev.x - downX
                     val dy = ev.y - downY
@@ -833,9 +1157,112 @@ class ReaderActivity : AppCompatActivity() {
                     }
                 }
             }
-            MotionEvent.ACTION_CANCEL -> downInStage = false
+            MotionEvent.ACTION_CANCEL -> {
+                downInStage = false
+                lightGestureCancel()
+            }
         }
         return super.dispatchTouchEvent(ev)
+    }
+
+    // ------------------------------------------------------------------ 屏幕灯手势
+
+    private fun lightGeometry() = LightGesture.Geometry(
+        widthPx = stage.width,
+        heightPx = stage.height,
+        density = resources.displayMetrics.density
+    )
+
+    private fun lightOn(): Boolean = ScreenLight.isOn(this, prefs.lightOn)
+
+    private fun lightGestureDown() {
+        lightLongPressFired = false
+        lightSwipeConsumed = false
+        lightSwipeDirty = false
+        lightSwipeBaseLevel = prefs.lightLevel
+        lightSwipeSteps = 0
+        if (!downInStage) return
+        val g = lightGeometry()
+        if (LightGesture.canToggleAt(g, downStageX, downStageY, ScreenLight.canToggle(this))) {
+            cancelLightLongPress()
+            val r = Runnable {
+                lightLongPressFired = true
+                toggleScreenLight()
+            }
+            lightLongPress = r
+            lightHandler.postDelayed(r, LightGesture.LONG_PRESS_MS)
+        }
+    }
+
+    /** @return true 表示这次移动被灯手势消费掉了（调用方应直接 return true） */
+    private fun lightGestureMove(x: Float, y: Float, viewX: Float, viewY: Float): Boolean {
+        if (LightGesture.movedBeyondSlop(downX, downY, viewX, viewY)) cancelLightLongPress()
+        if (lightLongPressFired) return true
+        val g = lightGeometry()
+        val dx = x - downStageX
+        val dy = y - downStageY
+        if (abs(dy) <= LightGesture.SWIPE_MIN_PX || abs(dy) <= abs(dx)) return false
+        if (!LightGesture.canBrightnessAt(g, downStageX, lightOn())) return false
+        val steps = (-dy / g.stepPx).toInt()
+        if (steps != lightSwipeSteps || !lightSwipeDirty) {
+            lightSwipeSteps = steps
+            lightSwipeDirty = true
+            applyLightLevel(lightSwipeBaseLevel + steps * ScreenLight.LEVEL_STEP, announce = false)
+        }
+        lightSwipeConsumed = true
+        return true
+    }
+
+    /** @return true 表示这次抬手属于灯手势，不应再走翻页判定 */
+    private fun lightGestureUp(): Boolean {
+        cancelLightLongPress()
+        val consumed = lightLongPressFired || lightSwipeConsumed
+        if (lightSwipeConsumed && lightSwipeDirty) {
+            toast(getString(R.string.light_level_toast, prefs.lightLevel))
+        }
+        lightLongPressFired = false
+        lightSwipeConsumed = false
+        return consumed
+    }
+
+    private fun lightGestureCancel() {
+        cancelLightLongPress()
+        lightLongPressFired = false
+        lightSwipeConsumed = false
+    }
+
+    private fun cancelLightLongPress() {
+        lightLongPress?.let { lightHandler.removeCallbacks(it) }
+        lightLongPress = null
+    }
+
+    private fun toggleScreenLight() {
+        if (!ScreenLight.canToggle(this)) {
+            toast(getString(R.string.light_toggle_unsupported))
+            return
+        }
+        val on = !lightOn()
+        prefs.lightOn = on
+        ScreenLight.setOn(this, on)
+        ScreenLight.applyToWindow(window, on, prefs.lightLevel)
+        toast(getString(if (on) R.string.light_on_toast else R.string.light_off_toast))
+    }
+
+    private fun applyLightLevel(level: Int, announce: Boolean) {
+        val v = LightGesture.clampLevel(level)
+        prefs.lightLevel = v
+        ScreenLight.setLevel(this, v)
+        ScreenLight.applyToWindow(window, lightOn(), v)
+        if (announce) toast(getString(R.string.light_level_toast, v))
+    }
+
+    /** 进入/回到前台时把持久化的灯状态作用到窗口 */
+    private fun restoreLight() {
+        ScreenLight.applyToWindow(window, lightOn(), prefs.lightLevel)
+    }
+
+    private fun toast(msg: String) {
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -875,7 +1302,27 @@ class ReaderActivity : AppCompatActivity() {
         RefreshModeManager.requestRefresh(activeView())
     }
 
-    private fun nextPage(): Boolean = when (mode) {
+    /**
+     * 翻页（§7 TXT 翻页 <500ms / <300ms）。
+     *
+     * 自绘画布与 Pdfium 在页面回调里结算耗时；两条 WebView 路径没有页面回调，
+     * 只能在这里就地收摊，否则 `navStartedAt` 会残留到下个动作，算出个假数字。
+     */
+    private fun nextPage(): Boolean = measureNav { nextPageInner() }
+
+    private fun prevPage(): Boolean = measureNav { prevPageInner() }
+
+    private fun measureNav(action: () -> Boolean): Boolean {
+        beginNav()
+        val moved = action()
+        if (mode == ReadMode.EPUB_FULL || mode == ReadMode.DOCX_HTML) {
+            Metrics.logPageTurn(bookId, mode.name, navStartedAt)
+            navStartedAt = 0L
+        }
+        return moved
+    }
+
+    private fun nextPageInner(): Boolean = when (mode) {
         ReadMode.EPUB_FULL -> {
             epubView?.next(); true
         }
@@ -891,7 +1338,7 @@ class ReaderActivity : AppCompatActivity() {
         else -> canvas.nextPage()
     }
 
-    private fun prevPage(): Boolean = when (mode) {
+    private fun prevPageInner(): Boolean = when (mode) {
         ReadMode.EPUB_FULL -> {
             epubView?.prev(); true
         }

@@ -5,6 +5,7 @@ import android.net.Uri
 import com.google.gson.Gson
 import com.readit.core.eal.PerfTier
 import com.readit.core.eal.RefreshMode
+import com.readit.core.text.Fonts
 import com.readit.core.util.ReadItLog
 import com.readit.data.prefs.ReadItPrefs
 import java.io.File
@@ -38,6 +39,7 @@ object ConfigBackup {
         val perfTier: String = PerfTier.AUTO.key,
         val refreshMode: String = RefreshMode.AUTO.key,
         val fontSizeSp: Float = ReadItPrefs.DEFAULT_FONT_SIZE_SP,
+        val fontFamily: String = ReadItPrefs.DEFAULT_FONT_FAMILY,
         val lineSpacing: Float = ReadItPrefs.DEFAULT_LINE_SPACING,
         val marginDp: Int = ReadItPrefs.DEFAULT_MARGIN_DP,
         val pdfCrop: Boolean = true,
@@ -65,6 +67,7 @@ object ConfigBackup {
         perfTier = prefs.perfTier.key,
         refreshMode = prefs.refreshMode.key,
         fontSizeSp = prefs.fontSizeSp,
+        fontFamily = prefs.fontFamily,
         lineSpacing = prefs.lineSpacing,
         marginDp = prefs.marginDp,
         pdfCrop = prefs.pdfCropEnabled,
@@ -113,6 +116,9 @@ object ConfigBackup {
         prefs.perfTier = PerfTier.from(s.perfTier)
         prefs.refreshMode = RefreshMode.from(s.refreshMode)
         prefs.fontSizeSp = s.fontSizeSp
+        // 字体：备份可能来自另一台设备，用户字体未必在；这里只做「内置/非空」校正，
+        // 真正的「文件还在吗」由 UserFonts.currentId() 在使用时兜底（会静默回退默认）。
+        prefs.fontFamily = Fonts.sanitize(s.fontFamily)
         prefs.lineSpacing = s.lineSpacing
         prefs.marginDp = s.marginDp
         prefs.pdfCropEnabled = s.pdfCrop

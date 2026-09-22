@@ -30,14 +30,36 @@
     <string name="action_toc">目录</string>
     <string name="action_typography">排版</string>
     <string name="action_refresh">刷新</string>
+    <string name="action_encoding">编码</string>
     <string name="action_cancel">取消</string>
     <string name="action_prev_page">上一页</string>
     <string name="action_next_page">下一页</string>
     <string name="action_menu">菜单</string>
     <string name="action_back">返回</string>
+    <string name="action_rename">重命名</string>
+    <string name="action_delete">删除</string>
     <string name="import_ok">已导入：%1$s</string>
     <string name="import_failed">导入失败</string>
-    <string name="read_failed">读取失败，可尝试在设置中手动选择编码</string>
+    <string name="read_failed">读取失败</string>
+    <!-- 书架长按：重命名 / 删除 -->
+    <string name="rename_title">重命名书籍</string>
+    <string name="rename_field_label">新书名</string>
+    <string name="rename_hint">输入新的书名</string>
+    <string name="rename_ext_note">扩展名保持为 %1$s（决定用哪种方式打开，不可改）</string>
+    <string name="rename_ok">已重命名为：%1$s</string>
+    <string name="rename_failed">重命名失败：文件被占用或目录只读</string>
+    <string name="rename_err_empty">书名不能为空</string>
+    <string name="rename_err_illegal">书名里不能有 / 或 \\ 这类字符</string>
+    <string name="rename_err_long">书名太长，请缩短一些</string>
+    <string name="rename_err_exists">已有一本同名书，请换个名字</string>
+    <string name="delete_title">删除书籍</string>
+    <string name="delete_message">确定删除《%1$s》吗？\n\n文件会从书籍目录里永久删除，且不可撤销。阅读进度与此书的编码记忆会一并清除。</string>
+    <string name="delete_ok">已删除：%1$s</string>
+    <string name="delete_failed">删除失败：%1$s（目录可能只读）</string>
+    <!-- F15 手动选择编码 -->
+    <string name="encoding_pick_title">选择文件编码</string>
+    <string name="encoding_still_garbled">用 %1$s 解码仍然不对，请再选一种</string>
+    <string name="encoding_applied">已按 %1$s 重新打开</string>
 
     <!-- Reader -->
     <string name="page_info">%1$d / %2$d</string>
@@ -48,6 +70,18 @@
     <string name="label_font_size">字号</string>
     <string name="label_line_spacing">行距</string>
     <string name="label_margin">边距</string>
+    <string name="label_font_family">字体</string>
+    <!-- 内置字体显示名，顺序必须与 Fonts.builtins() 一致 -->
+    <string-array name="font_builtin_labels">
+        <item>默认（无衬线）</item>
+        <item>衬线（宋体）</item>
+        <item>等宽</item>
+        <item>细体无衬线</item>
+        <item>思源宋体</item>
+        <item>霞鹜文楷</item>
+    </string-array>
+    <!-- 用户字体：%1$s = 字体文件名（去扩展名） -->
+    <string name="font_user_label">%1$s（仅 TXT）</string>
 
     <!-- EPUB -->
     <string name="epub_opening">正在打开 EPUB…</string>
@@ -84,6 +118,9 @@
     <string name="action_ok">知道了</string>
 
     <!-- Sync -->
+    <string name="sync_notif_channel">书籍同步</string>
+    <string name="sync_notif_title">正在同步书籍</string>
+    <string name="sync_notif_text">正与 WebDAV 服务器双向同步，完成后自动消失</string>
     <string name="sync_running">正在同步…</string>
     <string name="sync_done">同步完成：%1$s</string>
     <string name="sync_not_configured">请先填写 WebDAV 服务器地址</string>
@@ -98,7 +135,7 @@
 
     <!-- 无障碍（TalkBack）：文案即朗读内容，改动请一并评估朗读效果 -->
     <string name="a11y_canvas">正文区域，第 %1$d 页，共 %2$d 页</string>
-    <string name="a11y_open_book">打开 %1$s</string>
+    <string name="a11y_open_book">打开 %1$s，长按可重命名或删除</string>
     <string name="a11y_chapter_item">目录项 %1$s</string>
 
     <!-- 首次启动引导（Phase 4） -->
@@ -160,6 +197,17 @@
     <string name="pref_app_version">版本</string>
     <string name="pref_device_report">设备报告与按键采集</string>
     <string name="pref_device_report_summary">导出设备信息，或采集本机按键码用于补充设备库</string>
+    <!-- 屏幕灯 -->
+    <string name="pref_light_on">屏幕灯</string>
+    <string name="pref_light_on_summary">长按屏幕左下角可快速开关</string>
+    <string name="pref_light_level">亮度等级</string>
+    <string name="pref_light_level_summary">阅读页左边缘上下划动可快速调节</string>
+    <string name="light_on_toast">屏幕灯已开启</string>
+    <string name="light_off_toast">屏幕灯已关闭</string>
+    <string name="light_level_toast">亮度 %1$d%%</string>
+    <string name="light_toggle_unsupported">当前设备没有可用的屏幕灯开关</string>
+    <string name="light_brightness_only">非墨水屏设备：仅提供亮度调节</string>
+
     <string name="pref_about">关于</string>
     <string name="pref_about_summary">软件名称、版本、开发者与项目主页</string>
 
@@ -173,10 +221,17 @@
 
     <!-- Settings -->
     <string name="cat_performance">性能与显示</string>
+    <string name="cat_typography">字体与排版</string>
     <string name="cat_reading">阅读与解析</string>
+    <string name="cat_light">屏幕灯</string>
     <string name="cat_sync">WebDAV 同步</string>
     <string name="cat_input">输入</string>
     <string name="cat_about">关于</string>
+    <string name="pref_font_size">字号</string>
+    <string name="pref_font_size_summary">%1$d sp（10–20，阅读页「排版」面板也可调）</string>
+    <string name="pref_font_family">字体</string>
+    <string name="pref_font_dir">字体目录</string>
+    <string name="pref_font_dir_summary">应用已内置思源宋体与霞鹜文楷（开源可商用）。还想用别的字体，把 .ttf / .otf 放进此目录即可：%1$s</string>
     <string name="pref_perf_tier">性能档位</string>
     <string name="pref_perf_tier_applied">已切换档位：SoC %1$s / RAM %2$s</string>
     <string name="pref_refresh_mode">刷新模式</string>
@@ -197,7 +252,15 @@
     <string name="pref_webdav_dir">书库目录</string>
     <string name="pref_webdav_dir_summary">服务器上存放书籍的目录路径</string>
     <string name="pref_sync_now">立即同步</string>
-    <string name="pref_sync_now_summary">双向同步：远端新增下载，本地新增上传</string>
+    <string name="pref_sync_now_summary">双向同步：远端新增下载，本地新增上传（手动触发；自动同步见上方开关）</string>
+    <string name="pref_sync_auto">自动同步</string>
+    <string name="pref_sync_auto_summary">仅在非计费网络（WiFi / 以太网）下自动同步，间隔按系统版本分级</string>
+    <string name="pref_sync_strategy">自动同步策略</string>
+    <string name="sync_auto_on">已开启自动同步</string>
+    <string name="sync_auto_off">已关闭自动同步</string>
+    <string name="sync_strategy_manual">本机（API %1$d）不提供后台调度，仅支持手动同步</string>
+    <string name="sync_strategy_bg">B 级（API %1$d）：后台静默执行，每 %2$d 小时一次</string>
+    <string name="sync_strategy_fg">C/D 级（API %1$d）：前台服务执行，每 %2$d 小时一次</string>
     <string name="pref_sync_reset">清空同步基线</string>
     <string name="pref_sync_reset_summary">删除本地 ETag 记录，下次同步重新比对全部文件</string>
     <string name="pref_key_learn">按键学习向导</string>

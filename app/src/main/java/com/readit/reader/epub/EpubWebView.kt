@@ -13,6 +13,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import com.readit.core.util.ReadItLog
+import com.readit.eink.BuildConfig
 import org.json.JSONObject
 import java.io.File
 
@@ -53,7 +54,12 @@ class EpubWebView @JvmOverloads constructor(
     @Volatile
     private var lastSpineIndex: Int = 0
 
-    private data class Pending(val file: File, val cfi: String?, val fontPercent: Int)
+    private data class Pending(
+        val file: File,
+        val cfi: String?,
+        val fontPercent: Int,
+        val fontFamily: String
+    )
 
     init {
         configure()
@@ -63,6 +69,9 @@ class EpubWebView @JvmOverloads constructor(
     @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
     @Suppress("DEPRECATION")
     private fun configure() {
+        // debug 包开 WebView 远程调试：EPUB 的 JS 出了名地难查（epub.js 静默失败时 logcat 全空），
+        // 有 CDP 才能直接问页面真实状态（配合 tools/cdp_eval.py）。release 不受影响。
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         settings.apply {
             javaScriptEnabled = true
             allowFileAccess = true
@@ -144,8 +153,13 @@ class EpubWebView @JvmOverloads constructor(
 
     // ------------------------------------------------------------------ 对外 API
 
-    fun open(file: File, startCfi: String? = null, fontPercent: Int = DEFAULT_FONT_PERCENT) {
-        val p = Pending(file, startCfi, fontPercent)
+    fun open(
+        file: File,
+        startCfi: String? = null,
+        fontPercent: Int = DEFAULT_FONT_PERCENT,
+        fontFamily: String = DEFAULT_FONT_FAMILY
+    ) {
+        val p = Pending(file, startCfi, fontPercent, fontFamily)
         if (!pageReady) {
             pending = p
             return
@@ -154,10 +168,11 @@ class EpubWebView @JvmOverloads constructor(
     }
 
     private fun doOpen(p: Pending) {
-        openStartedAt = System.currentTimeMillis()
+        // 单调时钟：墙钟会被 NTP 校时回拨，差值可能为负（与 core/util/Metrics.kt 口径一致）
+        openStartedAt = android.os.SystemClock.elapsedRealtime()
         lastCfi = p.cfi.orEmpty()
         val url = "file://" + p.file.absolutePath
-        val js = "ReadItEpub.open(${JSONObject.quote(url)}, ${JSONObject.quote(p.cfi.orEmpty())}, ${p.fontPercent});"
+        val js = "ReadItEpub.open(${JSONObject.quote(url)}, ${JSONObject.quote(p.cfi.orEmpty())}, ${p.fontPercent}, ${JSONObject.quote(p.fontFamily)});"
         post { evaluateJavascript(js, null) }
     }
 
@@ -182,6 +197,16 @@ class EpubWebView @JvmOverloads constructor(
         post { evaluateJavascript("ReadItEpub.setFont($percent);", null) }
     }
 
+    /** 切换字体（CSS font-family）。传 [Fonts.cssFamily] 的结果即可。 */
+    fun setFontFamily(cssFamily: String) {
+        post {
+            evaluateJavascript(
+                "ReadItEpub.setFontFamily(${JSONObject.quote(cssFamily)});",
+                null
+            )
+        }
+    }
+
     fun currentCfi(): String = lastCfi
 
     fun currentSpineIndex(): Int = lastSpineIndex
@@ -197,8 +222,11 @@ class EpubWebView @JvmOverloads constructor(
 
         @JavascriptInterface
         fun onRendered(href: String, elapsedMs: String) {
-            val ms = elapsedMs.toLongOrNull() ?: (System.currentTimeMillis() - openStartedAt)
-            ReadItLog.i("epub rendered: href=$href jsElapsed=${elapsedMs}ms total=${System.currentTimeMillis() - openStartedAt}ms")
+            // 注意：兜底与 sinceReaderLoad 都是「自 reader.html 载入起」的累计时长，不是本章渲染耗时。
+            // 实测第 3 章打出 total=57008ms，容易被当成单次跳转耗时读走 —— 故把字段名改明白。
+            val sinceReaderLoad = android.os.SystemClock.elapsedRealtime() - openStartedAt
+            val ms = elapsedMs.toLongOrNull() ?: sinceReaderLoad
+            ReadItLog.i("epub rendered: href=$href jsElapsed=${elapsedMs}ms sinceReaderLoad=${sinceReaderLoad}ms")
             post { callback?.onRendered(href, ms) }
         }
 
@@ -228,5 +256,6 @@ class EpubWebView @JvmOverloads constructor(
         const val BRIDGE_NAME = "ReadItBridge"
         const val ASSET_URL = "file:///android_asset/readit_epub/reader.html"
         const val DEFAULT_FONT_PERCENT = 100
+        const val DEFAULT_FONT_FAMILY = "sans-serif"
     }
 }

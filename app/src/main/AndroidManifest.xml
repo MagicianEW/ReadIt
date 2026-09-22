@@ -4,6 +4,17 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!--
+        定时同步（§2.3 后台同步，未闭环项 A1）：用平台自带 JobScheduler，零依赖零体积。
+        setPersisted(true) 需要这个权限，否则 schedule() 直接抛。
+    -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 前台服务：API 28+ 必需；API 34+ 还需按类型单独声明 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- 后台同步的常驻通知（API 33+ 需运行时授权，被拒则静默降级为后台执行） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
     <!-- 自定义书籍目录：API≤29 用这个；API30+ 由 MANAGE_EXTERNAL_STORAGE 接管 -->
@@ -99,6 +110,21 @@
             android:name="com.readit.doc.DocxConvertService"
             android:exported="false"
             android:process=":converter" />
+        <!--
+            定时同步入口（§2.3 A1）。BIND_JOB_SERVICE 仅授予系统，
+            exported 必须放开，否则系统绑定不上。
+        -->
+        <service
+            android:name="com.readit.sync.SyncJobService"
+            android:exported="true"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <!-- C/D 级「同步前台化」容器，仅由 SyncJobService 拉起，不做常驻 -->
+        <service
+            android:name="com.readit.sync.SyncForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
     </application>
 
 </manifest>

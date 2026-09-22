@@ -2,7 +2,9 @@ package com.readit.eink
 
 import android.app.Application
 import androidx.multidex.MultiDexApplication
+import com.readit.core.util.Metrics
 import com.readit.core.util.ReadItLog
+import com.readit.sync.SyncScheduler
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 
 /**
@@ -13,6 +15,8 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 class ReadItApp : MultiDexApplication() {
 
     override fun onCreate() {
+        // §7 启动时间指标的起点，必须早于一切初始化
+        Metrics.markAppStart()
         super.onCreate()
 
         // ------------------------------------------------------------------
@@ -32,6 +36,11 @@ class ReadItApp : MultiDexApplication() {
         // PdfTextExtractor / PdfBoxBookmarks 调用；super.onCreate() 已完成 multidex 安装。
         // ------------------------------------------------------------------
         PDFBoxResourceLoader.init(this)
+
+        // 定时同步（§2.3 A1）：只在主进程校准一次；:converter 进程不需要，也没必要重复调度
+        if (ReadItLog.processName(this) == packageName) {
+            SyncScheduler.apply(this)
+        }
 
         ReadItLog.i("ReadIt starting (process=${ReadItLog.processName(this)})")
     }

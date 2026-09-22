@@ -61,4 +61,36 @@ object ProgressStore {
         val safe = bookId.replace(Regex("[^A-Za-z0-9._-]"), "_")
         return File(File(context.filesDir, DIR), "$safe.json")
     }
+
+    /**
+     * 删掉某本书的进度记录（书被删除时必须调用）。
+     *
+     * 不删会留下**永久孤儿记录**：`bookId` 是文件名，同名新书进来会直接继承旧进度。
+     */
+    fun delete(context: Context, bookId: String) {
+        runCatching { file(context, bookId).delete() }
+            .onFailure { ReadItLog.w("progress delete failed: ${it.message}") }
+    }
+
+    /**
+     * 重命名书籍时把进度从 [fromId] 搬到 [toId]。
+     *
+     * 两条纪律：
+     *  1. **确认新记录读得回来才删旧的** —— 否则一次失败的写入就把进度彻底弄丢（静默数据丢失）。
+     *  2. 两个书名 sanitize 后落到同一个文件时直接返回：`file()` 会把非
+     *     `[A-Za-z0-9._-]` 全换成 `_`，两个不同的中文书名完全可能撞到同一条记录。
+     */
+    fun move(context: Context, fromId: String, toId: String) {
+        val src = file(context, fromId)
+        if (src.absolutePath == file(context, toId).absolutePath) return
+        if (!src.exists()) return
+
+        val pos = load(context, fromId) ?: return
+        save(context, toId, pos)
+        if (load(context, toId) == null) {
+            ReadItLog.w("progress move unverified, keeping old record: $fromId -> $toId")
+            return
+        }
+        src.delete()
+    }
 }
