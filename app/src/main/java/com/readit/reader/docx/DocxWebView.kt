@@ -6,6 +6,7 @@ import android.util.AttributeSet
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.readit.core.display.Inversion
 import com.readit.core.util.ReadItLog
 import com.readit.doc.DocxHtmlToc
 import org.json.JSONObject
@@ -27,7 +28,7 @@ class DocxWebView @JvmOverloads constructor(
 ) : WebView(context, attrs) {
 
     init {
-        setBackgroundColor(Color.WHITE)
+        setBackgroundColor(Inversion.backColor(false))
         isVerticalScrollBarEnabled = true
         isHorizontalScrollBarEnabled = false
         overScrollMode = OVER_SCROLL_NEVER
@@ -45,6 +46,7 @@ class DocxWebView @JvmOverloads constructor(
                     post { runScrollJs(id) }
                 }
                 post { runFontJs(fontFamily) }
+                post { runInvertJs() }
             }
         }
         @Suppress("DEPRECATION")
@@ -93,6 +95,9 @@ class DocxWebView @JvmOverloads constructor(
 
     /** 打包字体的 @font-face 源（相对 baseUrl），null = 用系统/默认族名，不需要下载字体 */
     private var fontFaceSrc: String? = null
+
+    /** 反色状态（F27）；页面未就绪时挂起，等 onPageFinished 重放 */
+    private var inverted: Boolean = false
 
     /**
      * 挂载 HTML。[baseDir] 为图片所在目录，null 时退化为无 baseUrl 的内联加载。
@@ -165,6 +170,29 @@ class DocxWebView @JvmOverloads constructor(
             evaluateJavascript(js, null)
         } catch (e: Throwable) {
             ReadItLog.w("docx setFontFamily failed: ${e.message}")
+        }
+    }
+
+    /**
+     * 切换反色（F27）。注入的样式只改文字与底色，不动 img——
+     * DOCX 里的照片/图表反成负片会读不出来。
+     */
+    fun setInverted(value: Boolean) {
+        inverted = value
+        setBackgroundColor(Inversion.backColor(value))
+        if (!pageReady) return
+        runInvertJs()
+    }
+
+    private fun runInvertJs() {
+        try {
+            val js = "(function(){var s=document.getElementById('readit-invert');" +
+                "if(!s){s=document.createElement('style');s.id='readit-invert';" +
+                "(document.head||document.documentElement).appendChild(s);}" +
+                "s.textContent=" + JSONObject.quote(Inversion.docxCss(inverted)) + ";})();"
+            evaluateJavascript(js, null)
+        } catch (e: Throwable) {
+            ReadItLog.w("docx setInverted failed: ${e.message}")
         }
     }
 

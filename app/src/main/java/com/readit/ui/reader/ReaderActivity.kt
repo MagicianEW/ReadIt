@@ -15,6 +15,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.Spinner
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -34,14 +35,21 @@ import com.readit.core.text.ChapterDetector
 import com.readit.core.text.Fonts
 import com.readit.core.text.UserFonts
 import com.readit.core.text.EncodingDetector
+import com.readit.core.display.Inversion
 import com.readit.core.util.Metrics
 import com.readit.core.util.ReadItLog
+import com.readit.data.Bookmark
+import com.readit.data.BookmarkFile
+import com.readit.data.BookmarkStore
+import com.readit.data.Bookmarks
 import com.readit.data.ProgressPolicy
 import com.readit.data.ProgressStore
 import com.readit.data.ReadMode
 import com.readit.data.ReadingPosition
 import com.readit.data.TocEntry
 import com.readit.data.prefs.ReadItPrefs
+import com.readit.data.stats.ReadingStats
+import com.readit.data.stats.ReadingStatsStore
 import com.readit.doc.DocxConverter
 import com.readit.eink.R
 import com.readit.epub.EpubParser
@@ -129,6 +137,38 @@ class ReaderActivity : AppCompatActivity() {
     /** 打开动作的起点，用于「首帧 / 首屏」类指标 */
     private var openStartedAt = 0L
 
+    // ---------------------------------------------------------------- §F26 阅读统计
+
+    /**
+     * 本次「可见阅读时段」的起点（单调时钟），onResume 起、onPause 结。
+     *
+     * 用 [Metrics.now] 而不是墙上时钟：统计的是**读了多久**，不该被系统改时间影响。
+     * 前后台切换会切成若干段，段内累加进 [sessionMs]。
+     */
+    private var sessionStartedAt = 0L
+
+    /** 本次打开累计的可见阅读时长（跨多次前后台切换累加） */
+    private var sessionMs = 0L
+
+    /** 本次打开累计的翻页次数，只在 [logNav] 里 +1（所有渲染路径都走那里） */
+    private var sessionTurns = 0
+
+    /**
+     * 本次打开的统计是否已落盘。
+     *
+     * 统计口径是「一次打开 = openCount +1」，所以一个 Activity 实例**只能落一次**；
+     * onPause(isFinishing) 与 onDestroy 都可能触发，靠这个闸门防重复。
+     */
+    private var statsFlushed = false
+
+    /**
+     * 自绘画布最近一次回调里的总页数。
+     *
+     * TxtCanvasView 没有公开 pageCount 访问器，只有 `onPageChanged(index, total)`
+     * 这一个出口，顺手接住即可（不额外从 pager 反推，免得渲染中读坏状态）。
+     */
+    private var canvasTotalPages = 0
+
     /** 一次用户导航（翻页 / 目录跳转）的起点，页面回调时结算后清零 */
     private var navStartedAt = 0L
 
@@ -187,8 +227,14 @@ class ReaderActivity : AppCompatActivity() {
      * 两条 WebView 路径（EPUB_FULL / DOCX_HTML）没有页面回调，由发起处直接调用。
      */
     private fun logNav(startedAt: Long) {
-        if (navIsTocJump) Metrics.logTocJump(bookId, mode.name, startedAt)
-        else Metrics.logPageTurn(bookId, mode.name, startedAt)
+        if (navIsTocJump) {
+            Metrics.logTocJump(bookId, mode.name, startedAt)
+        } else {
+            Metrics.logPageTurn(bookId, mode.name, startedAt)
+            // F26：翻页计数就挂在这里 —— 自绘画布的页面回调与两条 WebView 路径
+            // （EPUB_FULL / DOCX_HTML）最终都走 logNav，挂别处必然漏一条路径。
+            sessionTurns++
+        }
     }
 
     /** 用户发起一次导航的起点；[tocJump] 区分目录跳转与翻页，决定结算时记哪条指标 */
@@ -266,7 +312,10 @@ class ReaderActivity : AppCompatActivity() {
         val openTf = UserFonts.typefaceFor(this, fontId())
         canvas.typeface = openTf
         ReadItLog.i("font at open: id=${fontId()} typeface=${openTf ?: "null(keep default)"}")
+        canvas.inverted = prefs.invertEnabled
         canvas.onPageChanged = { index, total ->
+            // F26：画布不公开 pageCount，从唯一出口接住总页数
+            if (total > 0) canvasTotalPages = total
             // TalkBack 读不到自绘正文（见 R18 结论），至少给出可定位的方位信息
             canvas.contentDescription = getString(R.string.a11y_canvas, index + 1, total)
             if (mode != ReadMode.EPUB_FULL && mode != ReadMode.PDF_RENDER && mode != ReadMode.DOCX_HTML) {
@@ -301,6 +350,7 @@ class ReaderActivity : AppCompatActivity() {
                 drawer.openDrawer(GravityCompat.START)
             }
         }
+        findViewById<Button>(R.id.btnBookmark).setOnClickListener { showBookmarks() }
         findViewById<Button>(R.id.btnTypography).setOnClickListener {
             if (panel.visibility != View.VISIBLE) {
                 // 每次展开都重扫一次字体目录：用户可能刚把 .ttf 丢进去
@@ -327,6 +377,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun ensureEpubView(): EpubWebView {
         epubView?.let { return it }
         val v = EpubWebView(this)
+        v.setInverted(prefs.invertEnabled)
         stage.addView(v, fullStageParams())
         epubView = v
         return v
@@ -335,6 +386,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun ensureDocxView(): DocxWebView {
         docxView?.let { return it }
         val v = DocxWebView(this)
+        v.setInverted(prefs.invertEnabled)
         v.onLoaded = { notePageShown(v) }
         stage.addView(v, fullStageParams())
         docxView = v
@@ -344,6 +396,7 @@ class ReaderActivity : AppCompatActivity() {
     private fun ensurePdfView(): PdfRenderView {
         pdfView?.let { return it }
         val v = PdfRenderView(this)
+        v.inverted = prefs.invertEnabled
         stage.addView(v, fullStageParams())
         pdfView = v
         return v
@@ -543,7 +596,7 @@ class ReaderActivity : AppCompatActivity() {
             }
         }
         Toast.makeText(this, getString(R.string.epub_opening), Toast.LENGTH_SHORT).show()
-        ev.open(file, saved?.cfi, fontPercent(), Fonts.cssFamily(fontId()))
+        ev.open(file, saved?.cfi, fontPercent(), Fonts.cssFamily(fontId()), prefs.invertEnabled)
     }
 
     private fun openEpubText(file: File, book: EpubParser.Book, saved: ReadingPosition?) {
@@ -894,9 +947,55 @@ class ReaderActivity : AppCompatActivity() {
                 ReadItLog.i("progress save skipped: mode=$mode（位置来源尚无效）")
             }
         }
+
+        // F26：结算本次「可见时段」。只累加、不落盘 —— 落盘统一在 flushStats()，
+        // 因为统计口径是「一次打开 = openCount +1」，中途写盘会把它记成多次打开。
+        if (sessionStartedAt > 0L) {
+            sessionMs += (Metrics.now() - sessionStartedAt).coerceAtLeast(0L)
+            sessionStartedAt = 0L
+        }
+        // 返回键退出时 onPause 先到、且 isFinishing 已为 true；这里补一次，
+        // 避免只依赖 onDestroy（进程被系统回收时 onDestroy 可能根本不执行）。
+        if (isFinishing) flushStats()
+    }
+
+    @Override
+    override fun onResume() {
+        super.onResume()
+        // F26：新的一段可见时段开始（首次进入也走这里，onCreate 后紧跟 onResume）
+        if (!statsFlushed) sessionStartedAt = Metrics.now()
+    }
+
+    /**
+     * 把本次打开的阅读统计落盘（F26）。
+     *
+     * 一个 Activity 实例只落一次，保证 openCount 与实际「打开」次数一致。
+     * 过短会话（误触、看错书）由 [ReadingStats.apply] 自行丢弃，这里不重复判。
+     */
+    private fun flushStats() {
+        if (statsFlushed) return
+        statsFlushed = true
+        if (bookId.isEmpty()) return
+        // 收尾当前时段（onDestroy 路径下 onPause 可能已经收过）
+        if (sessionStartedAt > 0L) {
+            sessionMs += (Metrics.now() - sessionStartedAt).coerceAtLeast(0L)
+            sessionStartedAt = 0L
+        }
+        val session = ReadingStats.Session(
+            bookId = bookId,
+            title = if (::bookFile.isInitialized) bookFile.nameWithoutExtension else bookId,
+            durationMs = sessionMs,
+            pageTurns = sessionTurns,
+            charOffset = if (::canvas.isInitialized) canvas.currentOffset() else 0,
+            totalPages = canvasTotalPages,
+            endedAt = System.currentTimeMillis()
+        )
+        ReadingStatsStore.record(this, session)
     }
 
     override fun onDestroy() {
+        // F26：先结算统计再拆视图 —— flushStats 需要读 canvas 的当前位置
+        flushStats()
         super.onDestroy()
         io.shutdownNow()
         epubView?.let { ev ->
@@ -949,6 +1048,141 @@ class ReaderActivity : AppCompatActivity() {
     private fun currentChapterIndex(): Int {
         val off = canvas.currentOffset()
         return entries.indexOfLast { it.offset >= 0 && it.offset <= off }.coerceAtLeast(0)
+    }
+
+    // ------------------------------------------------------------------ F25 书签
+
+    /**
+     * 当前阅读位置，字段口径与 onPause 写进度时**完全一致**（CFI / 页码 / 字符偏移三选一）。
+     *
+     * 刻意与 [ProgressPolicy] 复用同一套字段含义：书签与进度指的是同一处位置。
+     * 这里若另起一套坐标，「加书签时进度记第 1 页、书签记第 10 页」这类不一致
+     * 会在真机上表现为「跳书签跳错页」，而且极难复现。
+     */
+    private fun currentPositionForBookmark(): ReadingPosition {
+        val now = System.currentTimeMillis()
+        return when (mode) {
+            ReadMode.EPUB_FULL -> ReadingPosition(
+                chapterIndex = epubView?.currentSpineIndex() ?: 0,
+                updatedAt = now,
+                cfi = epubView?.currentCfi()
+            )
+            ReadMode.PDF_RENDER -> {
+                val page = pdfView?.currentPage ?: -1
+                ReadingPosition(chapterIndex = page.coerceAtLeast(0), updatedAt = now, pageIndex = page)
+            }
+            ReadMode.DOCX_HTML -> ReadingPosition(chapterIndex = lastDocxHeading, updatedAt = now)
+            else -> ReadingPosition(
+                charOffset = if (::canvas.isInitialized) canvas.currentOffset() else 0,
+                chapterIndex = currentChapterIndex(),
+                updatedAt = now
+            )
+        }
+    }
+
+    /** 书签标签：位置（页码 / 节号 / 章号）+ 正文片段，让用户在列表里能认出是哪一段 */
+    private fun bookmarkLabelFor(pos: ReadingPosition): String {
+        val where = when {
+            mode == ReadMode.PDF_RENDER && pos.pageIndex >= 0 -> {
+                val total = pdfView?.pageCount ?: 0
+                if (total > 0) getString(R.string.page_info, pos.pageIndex + 1, total) else ""
+            }
+            mode == ReadMode.EPUB_FULL -> getString(R.string.bookmark_epub_section, pos.chapterIndex + 1)
+            mode == ReadMode.DOCX_HTML -> getString(R.string.bookmark_docx_heading, pos.chapterIndex + 1)
+            else -> if (::canvas.isInitialized && canvas.hasDocument) {
+                getString(R.string.page_info, canvas.currentPage() + 1, canvas.totalPages())
+            } else ""
+        }
+        // 正文片段只有自绘画布拿得到；EPUB / PDF 的正文在 WebView / Pdfium 内部，不硬取
+        val canvasMode = mode == ReadMode.TXT || mode == ReadMode.EPUB_TEXT ||
+            mode == ReadMode.DOCX_TEXT || mode == ReadMode.PDF_TEXT
+        val snippet = if (canvasMode && ::canvas.isInitialized) canvas.snippetAt(pos.charOffset) else ""
+        return listOf(where, snippet).filter { it.isNotBlank() }.joinToString(" · ")
+    }
+
+    private fun showBookmarks() {
+        val file = BookmarkStore.load(this, bookId)
+        val list = Bookmarks.sorted(file)
+        val currentKey = Bookmarks.keyOfPosition(currentPositionForBookmark())
+        val builder = AlertDialog.Builder(this)
+            .setTitle(getString(R.string.bookmarks_title, list.size))
+
+        if (list.isEmpty()) {
+            builder.setMessage(R.string.bookmarks_empty)
+        } else {
+            val labels = list.mapIndexed { i, bm ->
+                // 当前位置那条加个星标：不用点进去就知道「这一页已经有了」
+                val text = bm.label.ifBlank { getString(R.string.bookmark_untitled, i + 1) }
+                if (Bookmarks.keyOf(bm) == currentKey) "★ $text" else text
+            }.toTypedArray()
+            builder.setItems(labels) { _, which -> jumpToBookmark(list[which]) }
+        }
+
+        // 当前位置已有书签时主按钮变成「删书签」，比让用户先进列表再找少一步
+        val already = Bookmarks.has(file, currentKey)
+        builder.setPositiveButton(if (already) R.string.bookmark_remove_here else R.string.bookmark_add) { _, _ ->
+            if (already) removeBookmarkAt(currentKey) else addBookmark()
+        }
+        builder.setNegativeButton(R.string.action_cancel, null)
+        builder.show()
+    }
+
+    private fun addBookmark() {
+        val pos = currentPositionForBookmark()
+        val bm = Bookmark.fromPosition(pos, bookmarkLabelFor(pos), System.currentTimeMillis())
+        val next = Bookmarks.add(BookmarkStore.load(this, bookId), bm)
+        BookmarkStore.save(this, bookId, next)
+        Toast.makeText(this, getString(R.string.bookmark_added), Toast.LENGTH_SHORT).show()
+        ReadItLog.i("bookmark added: $bookId key=${Bookmarks.keyOf(bm)} label=${bm.label}")
+    }
+
+    private fun removeBookmarkAt(key: String) {
+        val before = BookmarkStore.load(this, bookId)
+        val after = Bookmarks.remove(before, key)
+        if (after === before) return
+        BookmarkStore.save(this, bookId, after)
+        Toast.makeText(this, getString(R.string.bookmark_removed), Toast.LENGTH_SHORT).show()
+    }
+
+    /**
+     * 跳到一条书签。
+     *
+     * 导航协议与 [jumpTo] 完全一致：`beginNav` 发起 → 有页面回调的路径
+     * （自绘画布 / Pdfium）自动结算，WebView 两条路径就地结算。
+     * 这样书签跳转同样进 §7 指标，也不会漏掉 F26 的翻页计数。
+     */
+    private fun jumpToBookmark(bm: Bookmark) {
+        beginNav(tocJump = true)
+        val cfi = bm.cfi
+        val dispatched: Boolean = when (mode) {
+            ReadMode.EPUB_FULL ->
+                if (cfi != null && epubView != null) {
+                    epubView?.displayCfi(cfi); true
+                } else false
+            ReadMode.PDF_RENDER ->
+                if (bm.pageIndex >= 0 && pdfView != null) {
+                    pdfView?.goToPage(bm.pageIndex); true
+                } else false
+            ReadMode.DOCX_HTML ->
+                if (docxView != null) {
+                    lastDocxHeading = bm.chapterIndex
+                    docxView?.scrollToHeading(bm.chapterIndex); true
+                } else false
+            else ->
+                if (::canvas.isInitialized && canvas.hasDocument) {
+                    canvas.goToOffset(bm.charOffset); true
+                } else false
+        }
+        if (!dispatched) {
+            navStartedAt = 0L
+            Toast.makeText(this, getString(R.string.bookmark_not_jumpable), Toast.LENGTH_SHORT).show()
+            return
+        }
+        RefreshModeManager.requestFullRefresh(activeView())
+        if (mode == ReadMode.EPUB_FULL || mode == ReadMode.DOCX_HTML) {
+            logNav(navStartedAt)
+            navStartedAt = 0L
+        }
     }
 
     private fun jumpTo(entry: TocEntry) {
@@ -1108,6 +1342,30 @@ class ReaderActivity : AppCompatActivity() {
                 syncLabels()
             }
         })
+
+        // F27 反色：即时生效，不必退出阅读页再进
+        val swInvert = findViewById<Switch>(R.id.swInvert)
+        swInvert.isChecked = prefs.invertEnabled
+        swInvert.setOnCheckedChangeListener { _, checked ->
+            applyInversion(checked)
+            toast(getString(if (checked) R.string.invert_on_toast else R.string.invert_off_toast))
+        }
+    }
+
+    /**
+     * 应用反色（F27）。四条渲染路径各有各的载体，这里做统一入口：
+     * 自绘画布改 Paint 颜色、Pdfium 挂颜色矩阵滤镜、两条 WebView 注入样式，
+     * 都不需要重新分页或重新渲染当前页；最后补一次整屏刷新，
+     * 否则墨水屏上会留下半屏旧色（残影）。
+     */
+    private fun applyInversion(enabled: Boolean, persist: Boolean = true) {
+        if (persist) prefs.invertEnabled = enabled
+        canvas.inverted = enabled
+        pdfView?.inverted = enabled
+        epubView?.setInverted(enabled)
+        docxView?.setInverted(enabled)
+        ReadItLog.i("invert applied: enabled=$enabled mode=$mode")
+        RefreshModeManager.requestFullRefresh(activeView())
     }
 
     private open class SimpleSeekBarListener : SeekBar.OnSeekBarChangeListener {

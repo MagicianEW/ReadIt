@@ -57,10 +57,16 @@ object ProgressStore {
         }
     }
 
-    private fun file(context: Context, bookId: String): File {
-        val safe = bookId.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        return File(File(context.filesDir, DIR), "$safe.json")
-    }
+    /** 目录，供同步层枚举本机所有进度文件 */
+    fun dir(context: Context): File = File(context.filesDir, DIR)
+
+    /** 某本书对应的进度文件名（同步层用它拼远端 `readit_progress_<name>`） */
+    fun fileNameFor(bookId: String): String = "${safe(bookId)}.json"
+
+    private fun safe(bookId: String): String = bookId.replace(Regex("[^A-Za-z0-9._-]"), "_")
+
+    private fun file(context: Context, bookId: String): File =
+        File(dir(context), fileNameFor(bookId))
 
     /**
      * 删掉某本书的进度记录（书被删除时必须调用）。

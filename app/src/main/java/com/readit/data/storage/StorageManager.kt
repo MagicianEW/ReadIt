@@ -2,8 +2,10 @@ package com.readit.data.storage
 
 import android.content.Context
 import com.readit.core.util.ReadItLog
+import com.readit.data.BookmarkStore
 import com.readit.data.ProgressStore
 import com.readit.data.prefs.ReadItPrefs
+import com.readit.data.stats.ReadingStatsStore
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -262,6 +264,9 @@ object StorageManager {
         // 文件已经改了名，记忆必须跟着搬，否则进度与编码记忆全部失联
         ReadItPrefs.get(app).moveBookPrefs(file.name, newFileName)
         ProgressStore.move(app, file.name, newFileName)
+        // F26 / F25：统计与书签也是「按书名索引」的记忆，同一条纪律
+        ReadingStatsStore.move(app, file.name, newFileName)
+        BookmarkStore.move(app, file.name, newFileName)
         ReadItLog.i("book renamed: ${file.name} -> $newFileName")
         return dest
     }
@@ -269,5 +274,10 @@ object StorageManager {
     private fun clearBookState(context: Context, bookId: String) {
         ReadItPrefs.get(context).clearBookPrefs(bookId)
         ProgressStore.delete(context, bookId)
+        // F26：per-book 统计要清（否则同名新书会继承旧书的时长）；
+        // 全局累计存在 ReadingStatsFile 顶层，不受影响 —— 删一本书不该让总时长缩水。
+        ReadingStatsStore.delete(context, bookId)
+        // F25：书签同理
+        BookmarkStore.delete(context, bookId)
     }
 }

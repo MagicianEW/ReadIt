@@ -43,6 +43,12 @@
             app:title="@string/pref_font_family"
             app:useSimpleSummaryProvider="true" />
 
+        <SwitchPreferenceCompat
+            app:defaultValue="false"
+            app:key="invert"
+            app:summary="@string/pref_invert_summary"
+            app:title="@string/pref_invert" />
+
         <Preference
             app:key="font_dir"
             app:selectable="false"
@@ -140,6 +146,17 @@
             app:key="backup_import"
             app:summary="@string/pref_backup_import_summary"
             app:title="@string/pref_backup_import" />
+
+        <!-- F28：云端版本化备份（走 WebDAV，一次打包配置 + 统计 + 进度 + 书签） -->
+        <Preference
+            app:key="backup_cloud_create"
+            app:summary="@string/pref_backup_cloud_create_summary"
+            app:title="@string/pref_backup_cloud_create" />
+
+        <Preference
+            app:key="backup_cloud_restore"
+            app:summary="@string/pref_backup_cloud_restore_summary"
+            app:title="@string/pref_backup_cloud_restore" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/cat_input">

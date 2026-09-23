@@ -147,6 +147,29 @@
                     android:layout_weight="1"
                     android:contentDescription="@string/label_font_family" />
             </LinearLayout>
+
+            <!-- F27：墨水屏只有黑白两级，没有「背景色」可调，能调的是黑白置换 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:labelFor="@+id/swInvert"
+                    android:text="@string/label_invert"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+
+                <Switch
+                    android:id="@+id/swInvert"
+                    android:layout_width="wrap_content"
+                    android:layout_height="@dimen/touch_target_min"
+                    android:contentDescription="@string/label_invert" />
+            </LinearLayout>
         </LinearLayout>
 
         <View
@@ -167,6 +190,15 @@
                 android:layout_height="@dimen/touch_target_min"
                 android:layout_weight="1"
                 android:text="@string/action_toc"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/btnBookmark"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="@dimen/touch_target_min"
+                android:layout_weight="1"
+                android:text="@string/action_bookmark"
                 android:textSize="13sp" />
 
             <Button

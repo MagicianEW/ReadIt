@@ -81,6 +81,9 @@
          */
         var renderStart = 0;
         var startCfi = "";
+        /* 反色（黑白置换，F27）。epub.js 的正文在 iframe 里，
+           所以正文靠 rendition.themes.override，画布外圈靠 html/body 的底色。*/
+        var inverted = false;
 
         function fire(name, args) {
             try {
@@ -90,6 +93,24 @@
                 }
             } catch (e) {
                 /* 桥不可用时静默降级，避免污染页面 */
+            }
+        }
+
+        function applyTheme() {
+            var fg = inverted ? "#ffffff" : "#000000";
+            var bg = inverted ? "#000000" : "#ffffff";
+            try {
+                document.documentElement.style.background = bg;
+                document.body.style.background = bg;
+            } catch (e) {
+            }
+            if (!rendition) {
+                return;
+            }
+            try {
+                rendition.themes.override("color", fg);
+                rendition.themes.override("background", bg);
+            } catch (e) {
             }
         }
 
@@ -125,10 +146,11 @@
                 return typeof window.ePub === "function";
             },
 
-            open: function (url, cfi, fontPercent, fontFamily) {
+            open: function (url, cfi, fontPercent, fontFamily, invert) {
                 renderStart = Date.now();
                 startCfi = cfi || "";
                 fontFamily = fontFamily || "sans-serif";
+                inverted = !!invert;
                 if (typeof window.ePub !== "function") {
                     fire("onError", ["epub.js not loaded"]);
                     return;
@@ -149,12 +171,12 @@
                         minSpreadWidth: 100000
                     });
                     try {
-                        rendition.themes.override("color", "#000000");
-                        rendition.themes.override("background", "#ffffff");
                         rendition.themes.fontSize(fontPercent + "%");
                         rendition.themes.override("font-family", fontFamily);
                     } catch (e) {
                     }
+                    /* 正文字色/底色统一由 applyTheme 决定，避免反色状态两处维护 */
+                    applyTheme();
                     hookRendition(rendition);
                     /* 0 为首个 linear spine 项；有进度时用 CFI */
                     return rendition.display(startCfi ? startCfi : 0).catch(function (err) {
@@ -208,6 +230,11 @@
                 }
             },
 
+            setInverted: function (v) {
+                inverted = !!v;
+                applyTheme();
+            },
+
             setFontFamily: function (family) {
                 if (rendition && family) {
                     try {
@@ -237,6 +264,7 @@
                 }
                 book = null;
                 rendition = null;
+                inverted = false;
             }
         };
 

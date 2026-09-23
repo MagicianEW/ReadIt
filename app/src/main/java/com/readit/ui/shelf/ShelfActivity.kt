@@ -18,6 +18,8 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.readit.core.util.ReadItLog
 import com.readit.data.prefs.ReadItPrefs
+import com.readit.data.stats.ReadingStats
+import com.readit.data.stats.ReadingStatsStore
 import com.readit.data.storage.BookRename
 import com.readit.data.storage.StorageManager
 import com.readit.core.util.Metrics
@@ -26,6 +28,9 @@ import com.readit.ui.onboarding.OnboardingActivity
 import com.readit.ui.reader.ReaderActivity
 import com.readit.ui.settings.SettingsActivity
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * 书架（P1）。600×800 兜底：按钮最小热区 48dp，列表项 48dp。
@@ -45,6 +50,7 @@ class ShelfActivity : AppCompatActivity() {
         list.adapter = adapter
 
         findViewById<Button>(R.id.btnImport).setOnClickListener { pickFile() }
+        findViewById<Button>(R.id.btnStats).setOnClickListener { showStats() }
         findViewById<Button>(R.id.btnSettings).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java))
         }
@@ -169,6 +175,78 @@ class ShelfActivity : AppCompatActivity() {
         tv.visibility = View.VISIBLE
     }
 
+    // ---------------------------------------------------------------- F26 阅读统计
+
+    /**
+     * 统计入口：全局累计 + 读得最多的书。
+     *
+     * E-Ink 上另开一个页面反而更重（新建 Activity + 刷新），一个对话框足够；
+     * 数据全部来自 [ReadingStatsStore]，这里只做「纯函数分档 → 字符串资源」的映射。
+     */
+    private fun showStats() {
+        val file = ReadingStatsStore.load(this)
+        if (file.totalOpenCount == 0 && file.books.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.stats_title)
+                .setMessage(R.string.stats_empty)
+                .setPositiveButton(R.string.action_confirm, null)
+                .show()
+            return
+        }
+
+        val sb = StringBuilder()
+        sb.append(
+            getString(
+                R.string.stats_total_fmt,
+                durationText(file.totalMs),
+                file.totalOpenCount,
+                file.totalPageTurns
+            )
+        )
+        val top = ReadingStats.topBooks(file, TOP_N)
+        if (top.isNotEmpty()) {
+            sb.append("\n\n").append(getString(R.string.stats_top_title))
+            top.forEach { (id, st) ->
+                // 书名优先用统计里记的 title（重命名会同步搬家），空则退回 bookId
+                val name = st.title.ifBlank { id }
+                sb.append("\n· ")
+                    .append(getString(R.string.stats_book_fmt, name, durationText(st.totalMs), st.openCount))
+            }
+        }
+        if (file.firstReadAt > 0L) {
+            sb.append("\n\n").append(getString(R.string.stats_since_fmt, dateText(file.firstReadAt)))
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.stats_title)
+            .setMessage(sb.toString())
+            .setPositiveButton(R.string.action_confirm, null)
+            .setNeutralButton(R.string.stats_clear) { _, _ -> confirmClearStats() }
+            .show()
+    }
+
+    private fun confirmClearStats() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.stats_clear)
+            .setMessage(R.string.stats_clear_confirm)
+            .setPositiveButton(R.string.stats_clear) { _, _ ->
+                ReadingStatsStore.clear(this)
+                Toast.makeText(this, getString(R.string.stats_cleared), Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(R.string.action_cancel, null)
+            .show()
+    }
+
+    /** 时长文案：把纯函数分好的档映射到字符串资源（纯函数不碰资源，这一层才碰） */
+    private fun durationText(ms: Long): String = when (val d = ReadingStats.duration(ms)) {
+        is ReadingStats.Duration.HoursMinutes -> getString(R.string.stats_dur_hours, d.hours, d.minutes)
+        is ReadingStats.Duration.MinutesSeconds -> getString(R.string.stats_dur_minutes, d.minutes, d.seconds)
+        is ReadingStats.Duration.Seconds -> getString(R.string.stats_dur_seconds, d.seconds)
+    }
+
+    private fun dateText(at: Long): String =
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(at))
+
     private fun pickFile() {
         // API 19+ 均可用 SAF；返回值走 SAF URI
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
@@ -260,5 +338,8 @@ class ShelfActivity : AppCompatActivity() {
 
     companion object {
         private const val REQ_PICK = 1001
+
+        /** 排行榜取前几本：600×800 上一屏放得下的条数 */
+        private const val TOP_N = 5
     }
 }

@@ -61,7 +61,7 @@ class SyncJobService : JobService() {
                     prefs.webDavPassword,
                     prefs.webDavDir
                 )
-                WebDavSync(client).sync(ctx)
+                SyncRunner.run(ctx, client)
             }
             ReadItLog.i("sync job finished: " + describe(outcome))
             main.post { jobFinished(params, false) }
@@ -77,6 +77,6 @@ class SyncJobService : JobService() {
         super.onDestroy()
     }
 
-    private fun describe(outcome: Result<WebDavSync.SyncReport>): String =
+    private fun describe(outcome: Result<SyncRunner.Outcome>): String =
         outcome.getOrNull()?.summary() ?: "failed: ${outcome.exceptionOrNull()?.message}"
 }

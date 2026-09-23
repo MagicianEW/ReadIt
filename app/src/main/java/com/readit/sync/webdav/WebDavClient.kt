@@ -156,6 +156,25 @@ class WebDavClient(
     /** HEAD：取 ETag / Last-Modified / Content-Length（同步前探测） */
     fun stat(href: String): Triple<String?, String?, Long>? = statResolved(absolute(href))
 
+    /**
+     * ⚠️ **不要在 [upload] 之前调用本方法做「远端存不存在」的预探测。**
+     *
+     * 这里踩过一个很隐蔽的坑（真机 E2E 才暴露）：部分 WebDAV 服务端
+     * （实测 Cheroot/wsgidav）对 `HEAD` 的 4xx 响应会**照常带一个 HTML 错误正文**，
+     * 而按 HTTP 规范 HEAD 响应不该有正文。OkHttp 对 HEAD 天然不读正文
+     * （`isHeadRequest` → contentLength=0），于是这段 HTML 就留在了 keep-alive 连接里，
+     * 被**下一个请求的响应解析**当成状态行读掉：
+     *
+     * ```
+     * W ReadIt: sync upload failed: chapter_long.txt
+     *   -> Unexpected status line: <!DOCTYPE HTML PUBLIC '-//W3C//DTD HTML 4.01//EN' ...
+     * ```
+     *
+     * 现象极具误导性：服务端日志显示 `PUT ... -> 201 Created`、文件也确实传上去了，
+     * 只有客户端把它报成失败（进而基线没落盘，下一轮还会重复上传）。
+     * 去掉预探测后一切正常 —— PUT 的响应码本身就是权威信号
+     * （201 = 新建、200 = 覆盖），比先 HEAD 再猜准得多，还少一半请求。
+     */
     private fun statResolved(url: String): Triple<String?, String?, Long>? {
         return try {
             val req = Request.Builder().url(url).head().build()
@@ -206,26 +225,40 @@ class WebDavClient(
         )
         val builder = Request.Builder().url(url).put(body)
         when {
-            !remoteEtag.isNullOrEmpty() -> builder.header("If-Match", remoteEtag)
+            !remoteEtag.isNullOrEmpty() -> builder.header("If-Match", quoteEtag(remoteEtag))
             createOnly -> builder.header("If-None-Match", "*")
         }
 
-        val existing = if (remoteEtag.isNullOrEmpty()) statResolved(url) else null
-
+        // 不再先发 HEAD 探测「远端有没有」：见 statResolved 的注释 ——
+        // 那一发会在不合规的服务端上污染连接，把随后成功的 PUT 误报成失败。
+        // 新建 / 覆盖由响应码区分（201 Created / 200 OK），不需要额外请求。
         client.newCall(builder.build()).execute().use { resp ->
             if (resp.code() == 412) throw ConflictException("remote changed or already exists: $name")
             if (!resp.isSuccessful) throw IOException("PUT ${resp.code()} on $url")
-            ReadItLog.i("WebDAV upload ok: ${file.name} (${file.length()}B)")
+            ReadItLog.i("WebDAV upload ok: ${file.name} (${file.length()}B) -> ${resp.code()}")
             return UploadResult(
                 etag = resp.header("ETag"),
-                lastModified = resp.header("Last-Modified") ?: existing?.second,
-                created = existing == null && remoteEtag.isNullOrEmpty()
+                lastModified = resp.header("Last-Modified"),
+                created = resp.code() == 201
             )
         }
     }
 
     /** 远端资源与本地预期不一致（ETag/If-None-Match 条件失败） */
     class ConflictException(message: String) : IOException(message)
+
+    /**
+     * 把 ETag 补成 RFC 7232 要求的带引号形式再放进 `If-Match`。
+     *
+     * 基线的 etag 有两个来源：上传/下载响应头（本就带引号）与 `PROPFIND <getetag>`
+     * （wsgidav 实测**不带**引号）。若把不带引号的值直接塞进 `If-Match`，
+     * 严格的服务端会判成语法错误而拒绝 —— 这里统一补齐，
+     * 比较侧则用 [com.readit.sync.normalizeEtag] 去引号，两边互不干扰。
+     */
+    private fun quoteEtag(raw: String): String {
+        val t = raw.trim()
+        return if (t.startsWith("\"") || t.startsWith("W/", ignoreCase = true)) t else "\"$t\""
+    }
 
     // ---------------- internals ----------------
 

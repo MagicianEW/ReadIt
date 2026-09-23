@@ -69,7 +69,7 @@ class SyncForegroundService : Service() {
                     prefs.webDavPassword,
                     prefs.webDavDir
                 )
-                WebDavSync(client).sync(ctx)
+                SyncRunner.run(ctx, client)
             }
             ReadItLog.i("sync fg finished: " + describe(outcome))
             stopForegroundCompat()
@@ -85,7 +85,7 @@ class SyncForegroundService : Service() {
 
     // ------------------------------------------------------------------ 内部
 
-    private fun describe(outcome: Result<WebDavSync.SyncReport>): String =
+    private fun describe(outcome: Result<SyncRunner.Outcome>): String =
         outcome.getOrNull()?.summary() ?: "failed: ${outcome.exceptionOrNull()?.message}"
 
     private fun stopForegroundCompat() {

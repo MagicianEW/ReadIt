@@ -42,6 +42,7 @@ object ConfigBackup {
         val fontFamily: String = ReadItPrefs.DEFAULT_FONT_FAMILY,
         val lineSpacing: Float = ReadItPrefs.DEFAULT_LINE_SPACING,
         val marginDp: Int = ReadItPrefs.DEFAULT_MARGIN_DP,
+        val invert: Boolean = false,
         val pdfCrop: Boolean = true,
         val scanSamplePages: Int = 3,
         val scanMinCharsPerPage: Int = 100,
@@ -70,6 +71,7 @@ object ConfigBackup {
         fontFamily = prefs.fontFamily,
         lineSpacing = prefs.lineSpacing,
         marginDp = prefs.marginDp,
+        invert = prefs.invertEnabled,
         pdfCrop = prefs.pdfCropEnabled,
         scanSamplePages = prefs.scanSamplePages,
         scanMinCharsPerPage = prefs.scanMinCharsPerPage,
@@ -109,18 +111,36 @@ object ConfigBackup {
     /**
      * 覆盖式恢复。返回恢复的按键映射条数（0 表示备份里没有按键映射）。
      *
+     * **不是无差别覆盖**：`perfTier` / `refreshMode` 属「设备属性」，只在目标设备
+     * **从未显式设置过**该项时才接受备份值，否则保留本机现值 ——
+     * 判据与实测理由见 [DeviceScopedConfig]。`booksDir` 同样有存在性校验。
+     * 两条恢复路径（设置页「导入配置」与 F28 云端恢复）都走这个方法，规则天然一致。
+     *
      * 注意：调用方应在本方法返回后、**主线程**上调用 `Eal.reload()`
      * —— perfTier 变了，EAL 的缓存结果必须重算。
      */
     fun restore(prefs: ReadItPrefs, s: Snapshot): Int {
-        prefs.perfTier = PerfTier.from(s.perfTier)
-        prefs.refreshMode = RefreshMode.from(s.refreshMode)
+        // 设备属性项（档位 / 刷新模式）只在「本机从未显式设置过」时才接受备份里的值。
+        // 理由与实测后果见 DeviceScopedConfig 的文档；一句话：档位描述的是硬件，
+        // 跨设备照搬会把目标机无声降到更保守的渲染档。
+        if (DeviceScopedConfig.keepLocal(DeviceScopedConfig.KEY_PERF_TIER, prefs.hasExplicitPerfTier)) {
+            ReadItLog.i("config restore: 本机已显式设置档位 ${prefs.perfTier.key}，忽略备份里的 ${s.perfTier}")
+        } else {
+            prefs.perfTier = PerfTier.from(s.perfTier)
+        }
+        if (DeviceScopedConfig.keepLocal(DeviceScopedConfig.KEY_REFRESH_MODE, prefs.hasExplicitRefreshMode)) {
+            ReadItLog.i("config restore: 本机已显式设置刷新模式 ${prefs.refreshMode.key}，忽略备份里的 ${s.refreshMode}")
+        } else {
+            prefs.refreshMode = RefreshMode.from(s.refreshMode)
+        }
+
         prefs.fontSizeSp = s.fontSizeSp
         // 字体：备份可能来自另一台设备，用户字体未必在；这里只做「内置/非空」校正，
         // 真正的「文件还在吗」由 UserFonts.currentId() 在使用时兜底（会静默回退默认）。
         prefs.fontFamily = Fonts.sanitize(s.fontFamily)
         prefs.lineSpacing = s.lineSpacing
         prefs.marginDp = s.marginDp
+        prefs.invertEnabled = s.invert
         prefs.pdfCropEnabled = s.pdfCrop
         prefs.scanSamplePages = s.scanSamplePages
         prefs.scanMinCharsPerPage = s.scanMinCharsPerPage
@@ -152,7 +172,10 @@ object ConfigBackup {
             prefs.putKeyMap(code, v)
             restored++
         }
-        ReadItLog.i("config restored: keys=$restored ${s.summary()}")
+        // 两行分开记：第一行是「备份里写的什么」，第二行是「实际落到本机的是什么」。
+        // 档位/刷新可能被上面保留本机而没生效，合成一行会看不出来。
+        ReadItLog.i("config restored: keys=$restored 备份内容[${s.summary()}]")
+        ReadItLog.i("config effective: 档位 ${prefs.perfTier.key} · 刷新 ${prefs.refreshMode.key} · 字号 ${prefs.fontSizeSp}sp")
         return restored
     }
 

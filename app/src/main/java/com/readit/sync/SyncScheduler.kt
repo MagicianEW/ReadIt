@@ -43,9 +43,15 @@ object SyncScheduler {
         val api = Build.VERSION.SDK_INT
         val prefs = ReadItPrefs.get(ctx)
         val wanted = SyncCapability.shouldSchedule(api, prefs.syncAutoEnabled, prefs.webDavConfigured)
-        val existing = runCatching {
-            scheduler.allPendingJobs?.any { it.id == SyncCapability.JOB_ID } == true
-        }.getOrDefault(false)
+        val existing = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // getAllPendingJobs 是 API 24 才有的方法；API 21-23 上一律当作「没挂过」，
+            // 后面 schedule() 用同一个 JOB_ID 再挂一次是幂等的（系统按 id 替换）。
+            runCatching {
+                scheduler.allPendingJobs?.any { it.id == SyncCapability.JOB_ID } == true
+            }.getOrDefault(false)
+        } else {
+            false
+        }
 
         if (!wanted) {
             if (existing) {
@@ -73,11 +79,18 @@ object SyncScheduler {
             )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            // 1GB 墨水屏机型存储普遍紧张，存不下时先别同步
-            builder.setRequiresStorageNotLow(true)
             builder.setPeriodic(intervalMs, SyncCapability.FLEX_MS)
         } else {
             builder.setPeriodic(intervalMs)
+        }
+        // 必须单独判 O（26）：`setRequiresStorageNotLow` 是 API 26 才加的方法，
+        // 挂在 N（24）判断下会在 API 24/25 上抛 NoSuchMethodError ——
+        // 而这里是 Application.onCreate 的调用链，一抛就是**启动即崩**。
+        // 实测：KY-01L（API 25）配好 WebDAV 后每次启动都崩，配之前不崩
+        // （shouldSchedule 里 configured=false 会提前 return，把方法名解析这件事掩盖过去）。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // 1GB 墨水屏机型存储普遍紧张，存不下时先别同步
+            builder.setRequiresStorageNotLow(true)
         }
 
         val code = runCatching { scheduler.schedule(builder.build()) }

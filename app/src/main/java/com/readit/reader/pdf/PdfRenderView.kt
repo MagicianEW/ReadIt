@@ -4,12 +4,15 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
 import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
 import android.view.View
+import com.readit.core.display.Inversion
 import com.readit.core.util.ReadItLog
 import com.readit.pdf.PdfBookmark
 import com.readit.pdf.PdfCore
@@ -39,6 +42,15 @@ class PdfRenderView @JvmOverloads constructor(
 
     private val core = PdfCore(context)
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply { isAntiAlias = true }
+
+    /**
+     * 反色用的颜色矩阵滤镜（F27）。
+     *
+     * 刻意不做逐像素翻转：一页 A4 扫描件动辄几百万像素，CPU 逐像素会把
+     * 首屏预算吃穿；交给 Skia 在绘制时做，等于零成本（位图本身也不被改写，
+     * 关掉反色立刻恢复原样，不需要重新渲染这一页）。
+     */
+    private val invertFilter = ColorMatrixColorFilter(ColorMatrix(Inversion.argbMatrix()))
     private val main = Handler(Looper.getMainLooper())
 
     private var executor: ExecutorService? = null
@@ -52,6 +64,16 @@ class PdfRenderView @JvmOverloads constructor(
 
     /** 是否启用裁边（F07）；仅渲染档有效 */
     var cropEnabled: Boolean = true
+
+    /** 反色（黑白置换，F27）；只换滤镜，不重渲染当前页 */
+    var inverted: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                paint.colorFilter = if (value) invertFilter else null
+                invalidate()
+            }
+        }
 
     /** 渲染策略里的缓存页数，仅用于日志/后续预取，当前实现恒为单页常驻 */
     var cachePages: Int = 1
@@ -203,7 +225,7 @@ class PdfRenderView @JvmOverloads constructor(
     }
 
     override fun onDraw(canvas: Canvas) {
-        canvas.drawColor(Color.WHITE)
+        canvas.drawColor(Inversion.backColor(inverted))
         val bmp = page ?: return
         if (bmp.isRecycled) return
 

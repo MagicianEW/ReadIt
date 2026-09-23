@@ -35,6 +35,7 @@ class ReadItPrefs(private val sp: SharedPreferences) {
         private const val K_LIGHT_ON = "light_on"
         private const val K_LIGHT_LEVEL = "light_level"
         private const val K_SYNC_AUTO = "sync_auto"
+        private const val K_INVERT = "invert"
 
         /** 屏幕灯默认开着；默认亮度 50% */
         const val DEFAULT_LIGHT_ON = true
@@ -69,9 +70,20 @@ class ReadItPrefs(private val sp: SharedPreferences) {
         get() = PerfTier.from(sp.getString(K_PERF_TIER, PerfTier.AUTO.key))
         set(v) = sp.edit().putString(K_PERF_TIER, v.key).apply()
 
+    /**
+     * 用户是否**显式设置过**性能档位（判据是键存在，不是「值 != AUTO」）。
+     *
+     * 只看键：主动选「自动」也是一次显式决策，不该被配置恢复当成「没设过」而顶掉。
+     * 供 [com.readit.data.backup.DeviceScopedConfig] 在恢复配置时决定是否保留本机值。
+     */
+    val hasExplicitPerfTier: Boolean get() = sp.contains(K_PERF_TIER)
+
     var refreshMode: RefreshMode
         get() = RefreshMode.from(sp.getString(K_REFRESH_MODE, RefreshMode.AUTO.key))
         set(v) = sp.edit().putString(K_REFRESH_MODE, v.key).apply()
+
+    /** 同 [hasExplicitPerfTier]，作用于刷新模式 */
+    val hasExplicitRefreshMode: Boolean get() = sp.contains(K_REFRESH_MODE)
 
     var fontSizeSp: Float
         get() = com.readit.core.text.Fonts.clampFontSizeSp(sp.getFloat(K_FONT_SIZE_SP, DEFAULT_FONT_SIZE_SP))
@@ -95,6 +107,16 @@ class ReadItPrefs(private val sp: SharedPreferences) {
     var marginDp: Int
         get() = sp.getInt(K_MARGIN_DP, DEFAULT_MARGIN_DP)
         set(v) = sp.edit().putInt(K_MARGIN_DP, v).apply()
+
+    /**
+     * 反色（黑白置换，F27）。默认关。
+     *
+     * 为什么不做「背景色 / 主题」：墨水屏只有黑白两级，见
+     * [com.readit.core.display.Inversion] 里的取舍说明。
+     */
+    var invertEnabled: Boolean
+        get() = sp.getBoolean(K_INVERT, false)
+        set(v) = sp.edit().putBoolean(K_INVERT, v).apply()
 
     /** PDF 裁边（F07）：仅渲染档可用，默认开启 */
     var pdfCropEnabled: Boolean

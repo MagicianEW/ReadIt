@@ -7,6 +7,7 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.View
+import com.readit.core.display.Inversion
 import com.readit.core.util.ReadItLog
 import kotlin.math.max
 
@@ -63,11 +64,26 @@ class TxtCanvasView @JvmOverloads constructor(
             }
         }
 
+    /**
+     * 反色（黑白置换，F27）。
+     *
+     * 只改颜色，**不 rebuild**：颜色不影响换行与分页，重排会白白丢掉当前页
+     * 与恢复偏移的状态（还会多一次全量分页的计算）。
+     */
+    var inverted: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                paint.color = Inversion.fontColor(value)
+                invalidate()
+            }
+        }
+
     /** 页码变化回调（index 为 0-based） */
     var onPageChanged: ((Int, Int) -> Unit)? = null
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = 0xFF000000.toInt()
+        color = Inversion.fontColor(false)
         textSize = fontSizeSp * resources.displayMetrics.scaledDensity
     }
 
@@ -122,6 +138,30 @@ class TxtCanvasView @JvmOverloads constructor(
     fun currentPage(): Int = pageIndex
 
     fun totalPages(): Int = pager?.exactPageCount() ?: 1
+
+    /**
+     * 取某偏移处的一小段正文，用于书签标签（F25）。
+     *
+     * 从偏移往后扫：先跳过行首空白，遇到换行就停，凑够 [max] 个字符收工。
+     * 目的只是让用户在书签列表里认出「这是哪一段」，不需要精确到字 ——
+     * 所以不处理省略号，也不做两端对齐。
+     */
+    fun snippetAt(offset: Int, max: Int = 18): String {
+        if (fullText.isEmpty()) return ""
+        val sb = StringBuilder(max)
+        var i = offset.coerceIn(0, fullText.length)
+        while (i < fullText.length && sb.length < max) {
+            val c = fullText[i]
+            if (sb.isEmpty() && c.isWhitespace()) {
+                i++
+                continue
+            }
+            if (c == '\n' || c == '\r') break
+            sb.append(c)
+            i++
+        }
+        return sb.toString().trim()
+    }
 
     fun nextPage(): Boolean {
         val next = pageIndex + 1
@@ -205,7 +245,7 @@ class TxtCanvasView @JvmOverloads constructor(
     @SuppressLint("DrawAllocation")
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        canvas.drawColor(0xFFFFFFFF.toInt())
+        canvas.drawColor(Inversion.backColor(inverted))
         val page = pager?.page(pageIndex) ?: return
         val density = resources.displayMetrics.density
         val marginPx = marginDp * density

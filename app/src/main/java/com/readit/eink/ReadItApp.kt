@@ -38,8 +38,14 @@ class ReadItApp : MultiDexApplication() {
         PDFBoxResourceLoader.init(this)
 
         // 定时同步（§2.3 A1）：只在主进程校准一次；:converter 进程不需要，也没必要重复调度
+        //
+        // 整段包 runCatching：**调度是增强项，绝不允许它把应用启动带崩**。
+        // 已经吃过一次教训 —— `JobInfo.Builder.setRequiresStorageNotLow`（API 26）
+        // 被写在 API 24 的判断分支里，API 25 机型上一配好 WebDAV 就启动即崩，
+        // 单测全绿也看不出来（Robolectric/JVM 上根本不解析这个方法）。
         if (ReadItLog.processName(this) == packageName) {
-            SyncScheduler.apply(this)
+            runCatching { SyncScheduler.apply(this) }
+                .onFailure { ReadItLog.w("sync schedule failed at startup（不影响启动）: ${it.message}") }
         }
 
         ReadItLog.i("ReadIt starting (process=${ReadItLog.processName(this)})")

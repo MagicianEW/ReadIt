@@ -134,4 +134,51 @@ class SyncDeciderTest {
         assertFalse(SyncDecider.remoteChanged(RemoteMeta(null, "A", 1000L), rec))
         assertTrue(SyncDecider.remoteChanged(RemoteMeta(null, "B", 1000L), rec))
     }
+
+    // ---------------- ETag 归一化（真机 E2E 才暴露的坑） ----------------
+
+    @Test
+    fun `etag quoted by response header equals unquoted one from PROPFIND`() {
+        // 还原真机现场：基线来自 PUT/GET 响应头（带引号），
+        // 远端来自 PROPFIND <getetag>（wsgidav 不给引号）。
+        // 不归一化 -> 判「远端变了」-> 每轮同步重下整库，永远收敛不了。
+        val value = "ec716e12ee50809ee8ef92cb5f50c797-1790127075-43598"
+        val rec = record(etag = "\"$value\"")
+        assertFalse(SyncDecider.remoteChanged(RemoteMeta(value, null, 43598L), rec))
+        // 反向也要成立（基线来自 PROPFIND、远端给了带引号的响应头）
+        val recUnquoted = record(etag = value)
+        assertFalse(SyncDecider.remoteChanged(RemoteMeta("\"$value\"", null, 43598L), recUnquoted))
+        // 真换了版本仍必须判「变了」
+        assertTrue(SyncDecider.remoteChanged(RemoteMeta("$value-x", null, 43598L), rec))
+    }
+
+    @Test
+    fun `weak etag prefix is ignored when comparing`() {
+        val rec = record(etag = "W/\"v9\"")
+        assertFalse(SyncDecider.remoteChanged(RemoteMeta("\"v9\"", null, 1000L), rec))
+    }
+
+    @Test
+    fun `normalize etag strips wrapper forms and treats blanks as absent`() {
+        assertEquals("abc", normalizeEtag("\"abc\""))
+        assertEquals("abc", normalizeEtag("abc"))
+        assertEquals("abc", normalizeEtag("W/\"abc\""))
+        assertEquals("abc", normalizeEtag("  \"abc\"  "))
+        assertEquals(null, normalizeEtag(null))
+        assertEquals(null, normalizeEtag(""))
+        assertEquals(null, normalizeEtag("   "))
+        assertEquals(null, normalizeEtag("\"\""))
+    }
+
+    @Test
+    fun `etag that only differs by quoting is up to date end to end`() {
+        // 端到端语义：两侧同名文件、本地未改、远端 etag 只是少了引号 -> UP_TO_DATE
+        val rec = record(etag = "\"v1\"", localSize = 1000L, localLastModified = 100L)
+        val d = SyncDecider.both(
+            RemoteMeta("v1", "Mon, 01 Sep 2026 00:00:00 GMT", 1000L),
+            LocalMeta(1000L, 100L),
+            rec
+        )
+        assertEquals(SyncAction.UP_TO_DATE, d.action)
+    }
 }

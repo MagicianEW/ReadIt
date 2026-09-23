@@ -12,6 +12,7 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import com.readit.core.display.Inversion
 import com.readit.core.util.ReadItLog
 import com.readit.eink.BuildConfig
 import org.json.JSONObject
@@ -58,8 +59,12 @@ class EpubWebView @JvmOverloads constructor(
         val file: File,
         val cfi: String?,
         val fontPercent: Int,
-        val fontFamily: String
+        val fontFamily: String,
+        val inverted: Boolean
     )
+
+    /** 反色状态（F27）；reader.html 侧自己维护同名标志，这里只负责投递 */
+    private var inverted: Boolean = false
 
     init {
         configure()
@@ -88,7 +93,7 @@ class EpubWebView @JvmOverloads constructor(
             loadWithOverviewMode = false
             blockNetworkImage = false
         }
-        setBackgroundColor(Color.WHITE)
+        setBackgroundColor(Inversion.backColor(false))
         isVerticalScrollBarEnabled = false
         isHorizontalScrollBarEnabled = false
         isScrollbarFadingEnabled = false
@@ -157,9 +162,12 @@ class EpubWebView @JvmOverloads constructor(
         file: File,
         startCfi: String? = null,
         fontPercent: Int = DEFAULT_FONT_PERCENT,
-        fontFamily: String = DEFAULT_FONT_FAMILY
+        fontFamily: String = DEFAULT_FONT_FAMILY,
+        inverted: Boolean = false
     ) {
-        val p = Pending(file, startCfi, fontPercent, fontFamily)
+        this.inverted = inverted
+        setBackgroundColor(Inversion.backColor(inverted))
+        val p = Pending(file, startCfi, fontPercent, fontFamily, inverted)
         if (!pageReady) {
             pending = p
             return
@@ -172,7 +180,8 @@ class EpubWebView @JvmOverloads constructor(
         openStartedAt = android.os.SystemClock.elapsedRealtime()
         lastCfi = p.cfi.orEmpty()
         val url = "file://" + p.file.absolutePath
-        val js = "ReadItEpub.open(${JSONObject.quote(url)}, ${JSONObject.quote(p.cfi.orEmpty())}, ${p.fontPercent}, ${JSONObject.quote(p.fontFamily)});"
+        val js = "ReadItEpub.open(${JSONObject.quote(url)}, ${JSONObject.quote(p.cfi.orEmpty())}, " +
+            "${p.fontPercent}, ${JSONObject.quote(p.fontFamily)}, ${p.inverted});"
         post { evaluateJavascript(js, null) }
     }
 
@@ -205,6 +214,21 @@ class EpubWebView @JvmOverloads constructor(
                 null
             )
         }
+    }
+
+    /**
+     * 切换反色（F27）。
+     *
+     * 网页底色也要一起换，否则 epub.js 分栏之后画布两侧的留白仍是白的，
+     * 在墨水屏上会是一道刺眼的白边。
+     */
+    fun setInverted(value: Boolean) {
+        inverted = value
+        setBackgroundColor(Inversion.backColor(value))
+        // reader.html 尚未载入时 ReadItEpub 还不存在，evaluateJavascript 会抛 ReferenceError
+        // 并只留在 console 里 —— 打开过程本来就会带一次 inverted（见 open()），这里不必抢跑。
+        if (!pageReady) return
+        post { evaluateJavascript("ReadItEpub.setInverted($value);", null) }
     }
 
     fun currentCfi(): String = lastCfi

@@ -23,6 +23,15 @@
             android:textStyle="bold" />
 
         <Button
+            android:id="@+id/btnStats"
+            style="?android:attr/borderlessButtonStyle"
+            android:layout_width="wrap_content"
+            android:layout_height="@dimen/touch_target_min"
+            android:minWidth="64dp"
+            android:text="@string/action_stats"
+            android:textSize="13sp" />
+
+        <Button
             android:id="@+id/btnImport"
             style="?android:attr/borderlessButtonStyle"
             android:layout_width="wrap_content"

@@ -26,6 +26,7 @@ import com.readit.core.eal.RefreshMode
 import com.readit.core.eal.RefreshModeManager
 import com.readit.core.input.InputMapper
 import com.readit.core.util.ReadItLog
+import com.readit.data.BackupNaming
 import com.readit.data.backup.ConfigBackup
 import com.readit.data.prefs.ReadItPrefs
 import com.readit.data.storage.StorageManager
@@ -33,7 +34,9 @@ import com.readit.eink.BuildConfig
 import com.readit.eink.R
 import com.readit.eink.ui.MainActivity
 import com.readit.sync.SyncCapability
+import com.readit.sync.SyncRunner
 import com.readit.sync.SyncScheduler
+import com.readit.sync.VersionedBackup
 import com.readit.sync.SyncStateStore
 import com.readit.sync.WebDavSync
 import com.readit.sync.webdav.DavUrl
@@ -356,6 +359,15 @@ class SettingsActivity : AppCompatActivity() {
                 }
             }
 
+            // F27 反色：读写同一份 prefs，与阅读页「排版」面板里的开关是同一个值
+            findPreference<SwitchPreferenceCompat>("invert")?.let { p ->
+                p.isChecked = prefs.invertEnabled
+                p.setOnPreferenceChangeListener { _, v ->
+                    prefs.invertEnabled = v as? Boolean ?: false
+                    true
+                }
+            }
+
             findPreference<Preference>("font_dir")?.let { p ->
                 p.summary = getString(R.string.pref_font_dir_summary, UserFonts.dirLabel(requireContext()))
             }
@@ -460,14 +472,14 @@ class SettingsActivity : AppCompatActivity() {
             val appCtx = ctx.applicationContext
 
             io.execute {
-                val result: Pair<WebDavSync.SyncReport?, String> = try {
+                val result: Pair<SyncRunner.Outcome?, String> = try {
                     val client = WebDavClient(
                         prefs.webDavUrl,
                         prefs.webDavUser,
                         prefs.webDavPassword,
                         prefs.webDavDir
                     )
-                    WebDavSync(client).sync(appCtx) to ""
+                    SyncRunner.run(appCtx, client) to ""
                 } catch (e: Exception) {
                     ReadItLog.e("sync failed", e)
                     null to (e.message ?: "")
@@ -503,6 +515,117 @@ class SettingsActivity : AppCompatActivity() {
                     .show()
                 true
             }
+
+            // F28：云端版本化备份
+            val cloudCreate = findPreference<Preference>("backup_cloud_create")
+            cloudCreate?.setOnPreferenceClickListener {
+                val prefs = ReadItPrefs.get(requireContext())
+                if (!prefs.webDavConfigured) {
+                    toast(getString(R.string.backup_cloud_need_config))
+                    return@setOnPreferenceClickListener true
+                }
+                cloudCreate.summary = getString(R.string.backup_cloud_running)
+                val appCtx = requireContext().applicationContext
+                io.execute {
+                    val msg = try {
+                        val name = VersionedBackup(webDavClient(prefs), BuildConfig.VERSION_NAME)
+                            .backup(appCtx)
+                        getString(R.string.backup_cloud_created, BackupNaming.display(name))
+                    } catch (e: Exception) {
+                        ReadItLog.e("cloud backup failed", e)
+                        getString(R.string.backup_cloud_failed, e.message ?: "")
+                    }
+                    main.post {
+                        cloudCreate.summary = getString(R.string.pref_backup_cloud_create_summary)
+                        toast(msg)
+                    }
+                }
+                true
+            }
+
+            val cloudRestore = findPreference<Preference>("backup_cloud_restore")
+            cloudRestore?.setOnPreferenceClickListener {
+                val prefs = ReadItPrefs.get(requireContext())
+                if (!prefs.webDavConfigured) {
+                    toast(getString(R.string.backup_cloud_need_config))
+                    return@setOnPreferenceClickListener true
+                }
+                cloudRestore.summary = getString(R.string.backup_cloud_running)
+                io.execute {
+                    val entries = try {
+                        VersionedBackup(webDavClient(prefs), BuildConfig.VERSION_NAME).list()
+                    } catch (e: Exception) {
+                        ReadItLog.e("cloud backup list failed", e)
+                        main.post {
+                            cloudRestore.summary = getString(R.string.pref_backup_cloud_restore_summary)
+                            toast(getString(R.string.backup_cloud_failed, e.message ?: ""))
+                        }
+                        return@execute
+                    }
+                    main.post {
+                        cloudRestore.summary = getString(R.string.pref_backup_cloud_restore_summary)
+                        if (entries.isEmpty()) {
+                            toast(getString(R.string.backup_cloud_empty))
+                        } else {
+                            askRestore(prefs, entries)
+                        }
+                    }
+                }
+                true
+            }
+        }
+
+        private fun webDavClient(prefs: ReadItPrefs) = WebDavClient(
+            prefs.webDavUrl,
+            prefs.webDavUser,
+            prefs.webDavPassword,
+            prefs.webDavDir
+        )
+
+        /** 版本列表 → 二次确认 → 恢复。两个对话框都是必需的：恢复会覆盖本机数据 */
+        private fun askRestore(prefs: ReadItPrefs, entries: List<VersionedBackup.Entry>) {
+            val labels = entries.map { "${it.display}（${sizeText(it.size)}）" }.toTypedArray()
+            AlertDialog.Builder(requireContext())
+                .setTitle(R.string.backup_cloud_pick)
+                .setItems(labels) { _, which ->
+                    val entry = entries[which]
+                    AlertDialog.Builder(requireContext())
+                        .setTitle(R.string.pref_backup_cloud_restore)
+                        .setMessage(R.string.backup_cloud_restore_confirm)
+                        .setPositiveButton(R.string.action_confirm) { _, _ -> doRestore(prefs, entry) }
+                        .setNegativeButton(R.string.action_cancel, null)
+                        .show()
+                }
+                .setNegativeButton(R.string.action_cancel, null)
+                .show()
+        }
+
+        private fun doRestore(prefs: ReadItPrefs, entry: VersionedBackup.Entry) {
+            val appCtx = requireContext().applicationContext
+            io.execute {
+                val msg = try {
+                    val r = VersionedBackup(webDavClient(prefs), BuildConfig.VERSION_NAME).restore(appCtx, entry)
+                    main.post {
+                        // 与「导入配置」同一条纪律：档位可能变了，EAL 缓存必须重算，
+                        // 设置页上依赖 prefs 的控件也要重新同步，否则界面显示的还是旧值。
+                        Eal.reload(appCtx)
+                        RefreshModeManager.apply(prefs.refreshMode)
+                        syncControlsFromPrefs(prefs)
+                        findPreference<Preference>("eal_summary")?.summary = Eal.describe()
+                    }
+                    getString(R.string.backup_cloud_restored, "${entry.display} · ${r.summary()}")
+                } catch (e: Exception) {
+                    ReadItLog.e("cloud restore failed", e)
+                    getString(R.string.backup_cloud_failed, e.message ?: "")
+                }
+                main.post { toast(msg) }
+            }
+        }
+
+        private fun sizeText(bytes: Long): String = when {
+            bytes < 0 -> "?"
+            bytes < 1024 -> "${bytes}B"
+            else -> "${bytes / 1024}KB"
         }
 
         private fun exportConfig(uri: android.net.Uri) {
@@ -546,6 +669,7 @@ class SettingsActivity : AppCompatActivity() {
             findPreference<ListPreference>("perf_tier")?.value = prefs.perfTier.key
             findPreference<ListPreference>("refresh_mode")?.value = prefs.refreshMode.key
             findPreference<SwitchPreferenceCompat>("pdf_crop")?.isChecked = prefs.pdfCropEnabled
+            findPreference<SwitchPreferenceCompat>("invert")?.isChecked = prefs.invertEnabled
             findPreference<EditTextPreference>("scan_sample_pages")?.text =
                 prefs.scanSamplePages.toString()
             findPreference<EditTextPreference>("scan_min_chars")?.text =

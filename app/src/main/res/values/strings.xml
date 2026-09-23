@@ -71,6 +71,9 @@
     <string name="label_line_spacing">行距</string>
     <string name="label_margin">边距</string>
     <string name="label_font_family">字体</string>
+    <string name="label_invert">反色（黑白置换）</string>
+    <string name="invert_on_toast">已开启反色</string>
+    <string name="invert_off_toast">已关闭反色</string>
     <!-- 内置字体显示名，顺序必须与 Fonts.builtins() 一致 -->
     <string-array name="font_builtin_labels">
         <item>默认（无衬线）</item>
@@ -192,6 +195,20 @@
     <string name="backup_import_failed">导入失败：%1$s</string>
     <string name="backup_import_confirm_title">导入配置</string>
     <string name="backup_import_confirm_msg">将覆盖当前的档位、排版、扫描阈值、WebDAV 地址与全部按键映射（密码不受影响，保留原值）。\n\n继续？</string>
+
+    <!-- F28 云端版本化备份 -->
+    <string name="pref_backup_cloud_create">立即备份到云端</string>
+    <string name="pref_backup_cloud_create_summary">把配置、阅读统计、进度与书签打包上传为一份带时间戳的版本</string>
+    <string name="pref_backup_cloud_restore">从云端备份恢复</string>
+    <string name="pref_backup_cloud_restore_summary">列出云端已有版本，选择一份恢复（不会删除备份里没有的记录）</string>
+    <string name="backup_cloud_running">正在处理…</string>
+    <string name="backup_cloud_created">已备份：%1$s</string>
+    <string name="backup_cloud_failed">备份失败：%1$s</string>
+    <string name="backup_cloud_empty">云端还没有备份</string>
+    <string name="backup_cloud_pick">选择要恢复的版本</string>
+    <string name="backup_cloud_restore_confirm">将用该版本覆盖同名的配置 / 统计 / 进度 / 书签。\n\n继续？</string>
+    <string name="backup_cloud_restored">已恢复：%1$s</string>
+    <string name="backup_cloud_need_config">请先在上方配置 WebDAV 地址与账号</string>
     <string name="pref_rerun_onboarding">重新运行首次引导</string>
     <string name="pref_rerun_onboarding_summary">再走一遍性能档位 / 刷新模式 / 按键绑定 / 导入</string>
     <string name="pref_app_version">版本</string>
@@ -230,6 +247,8 @@
     <string name="pref_font_size">字号</string>
     <string name="pref_font_size_summary">%1$d sp（10–20，阅读页「排版」面板也可调）</string>
     <string name="pref_font_family">字体</string>
+    <string name="pref_invert">反色（黑白置换）</string>
+    <string name="pref_invert_summary">把正文与底色黑白对调，强光或暗环境下更省眼。墨水屏只有黑白两级，没有「背景色」可调；图片与插图不参与反色。</string>
     <string name="pref_font_dir">字体目录</string>
     <string name="pref_font_dir_summary">应用已内置思源宋体与霞鹜文楷（开源可商用）。还想用别的字体，把 .ttf / .otf 放进此目录即可：%1$s</string>
     <string name="pref_perf_tier">性能档位</string>
@@ -302,6 +321,35 @@
     <string name="dir_picker_created">已新建：%1$s</string>
     <string name="dir_picker_exists">同名文件夹已存在，已进入</string>
     <string name="dir_picker_create_failed">新建失败</string>
+
+    <!-- F26 阅读统计 -->
+    <string name="action_stats">统计</string>
+    <string name="stats_title">阅读统计</string>
+    <string name="stats_empty">还没有阅读记录。\n打开一本书读一会儿，这里就会记下来。</string>
+    <string name="stats_total_fmt">累计阅读 %1$s · 打开 %2$d 次 · 翻页 %3$d 次</string>
+    <string name="stats_top_title">读得最多的书</string>
+    <string name="stats_book_fmt">%1$s · %2$s · %3$d 次</string>
+    <string name="stats_since_fmt">自 %1$s 开始记录</string>
+    <string name="stats_clear">清空统计</string>
+    <string name="stats_clear_confirm">确定清空全部阅读统计？此操作不可撤销。</string>
+    <string name="stats_cleared">已清空阅读统计</string>
+    <string name="stats_dur_hours">%1$d 小时 %2$d 分</string>
+    <string name="stats_dur_minutes">%1$d 分 %2$d 秒</string>
+    <string name="stats_dur_seconds">%1$d 秒</string>
+
+    <!-- F25 书签 -->
+    <string name="action_bookmark">书签</string>
+    <string name="bookmarks_title">书签（%1$d）</string>
+    <string name="bookmarks_empty">这本书还没有书签。\n点「加书签」把当前这一页记下来。</string>
+    <string name="bookmark_add">加书签</string>
+    <string name="bookmark_remove_here">删书签</string>
+    <string name="bookmark_added">已加书签</string>
+    <string name="bookmark_removed">已删书签</string>
+    <string name="bookmark_delete_title">删除书签</string>
+    <string name="bookmark_epub_section">第 %1$d 节</string>
+    <string name="bookmark_docx_heading">第 %1$d 章</string>
+    <string name="bookmark_untitled">书签 %1$d</string>
+    <string name="bookmark_not_jumpable">这个书签暂时跳不过去</string>
 
     <string-array name="perf_tier_entries">
         <item>自动</item>

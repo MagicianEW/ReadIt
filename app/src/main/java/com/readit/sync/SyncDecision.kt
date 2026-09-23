@@ -54,6 +54,31 @@ data class SyncRecord(
 
 data class SyncDecision(val action: SyncAction, val reason: String)
 
+/**
+ * 归一化 ETag：去掉弱校验前缀 `W/` 与首尾双引号，空值 / 空串一律返回 null（=「服务端没给」）。
+ *
+ * ★ 真机 E2E 踩到的坑：同一个 ETag 值在**不同来源**上的包裹形式不一致 ——
+ * 实测 wsgidav/cheroot：
+ *  - `PUT` / `GET` 的响应头给 `"ec716e12…-1790127075-43598"`（带双引号，符合 RFC 7232）
+ *  - 同一文件的 `PROPFIND <D:getetag>` 给 `ec716e12…-1790127075-43598`（**不带引号**）
+ *
+ * 直接做字符串比较会把同一个版本判成两个版本，后果是 **每轮同步都把整库重下一遍**，
+ * 永远收敛不到「已最新」。而且它不报错、不冲突，只是白耗流量与电量 ——
+ * 在墨水瓶这种按流量和电算成本的设备上尤其难被发现。
+ *
+ * 比较用归一化值；**出站** `If-Match` 仍要用带引号的规范形式（见 WebDavClient.upload）。
+ */
+fun normalizeEtag(raw: String?): String? {
+    val trimmed = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    val strong = if (trimmed.startsWith("W/", ignoreCase = true)) trimmed.substring(2).trim() else trimmed
+    val unquoted = if (strong.length >= 2 && strong.startsWith("\"") && strong.endsWith("\"")) {
+        strong.substring(1, strong.length - 1)
+    } else {
+        strong
+    }
+    return unquoted.ifEmpty { null }
+}
+
 object SyncDecider {
 
     /** 远端独有 */
@@ -84,8 +109,10 @@ object SyncDecider {
 
     /** ETag 优先；无 ETag 退 Last-Modified；两者皆无退体积（R19 兜底链） */
     fun remoteChanged(remote: RemoteMeta, record: SyncRecord): Boolean {
-        if (!record.etag.isNullOrEmpty() && !remote.etag.isNullOrEmpty()) {
-            return record.etag != remote.etag
+        val baselineEtag = normalizeEtag(record.etag)
+        val remoteEtag = normalizeEtag(remote.etag)
+        if (baselineEtag != null && remoteEtag != null) {
+            return baselineEtag != remoteEtag
         }
         if (!record.lastModified.isNullOrEmpty() && !remote.lastModified.isNullOrEmpty()) {
             return record.lastModified != remote.lastModified
