@@ -16,8 +16,10 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import fitz  # PyMuPDF
 
-SRC = sys.argv[1] if len(sys.argv) > 1 else r"<LOCAL_HOME>\WorkBuddy\ReadIt\.workbuddy\tmp\testbooks\04_pdf_text_20p.pdf"
-OUT = sys.argv[2] if len(sys.argv) > 2 else r"<LOCAL_HOME>\WorkBuddy\ReadIt\.workbuddy\tmp\testbooks\07_pdf_aes.pdf"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+SRC = sys.argv[1] if len(sys.argv) > 1 else os.path.join(_ROOT, ".workbuddy", "tmp", "testbooks", "04_pdf_text_20p.pdf")
+OUT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(_ROOT, ".workbuddy", "tmp", "testbooks", "07_pdf_aes.pdf")
 
 print("PyMuPDF", fitz.__doc__)
 doc = fitz.open(SRC)

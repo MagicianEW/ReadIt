@@ -21,9 +21,10 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$adb = "<LOCAL_HOME>\AppData\Local\Android\Sdk\platform-tools\adb.exe"
+. (Join-Path $PSScriptRoot "env.ps1")
+$adb = $ReadItAdb
 $pkg = "com.readit.eink"
-$root = "<LOCAL_HOME>\WorkBuddy\ReadIt"
+$root = $ReadItRoot
 $out = Join-Path $root ".workbuddy\tmp\progress"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 

@@ -8,7 +8,8 @@ rem cannot be invoked directly from a PowerShell prompt. Bypass is scoped to thi
 rem process only. install.ps1 itself picks the APK matching the device ABI and accepts an
 rem optional -Serial when several devices are plugged in.
 rem
-rem Everything is redirected inside cmd so PowerShell never sees native stderr progress
-rem output (which PowerShell turns into an ErrorRecord and aborts the whole command).
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "<LOCAL_HOME>\WorkBuddy\ReadIt\scripts\install.ps1" > "<LOCAL_HOME>\WorkBuddy\ReadIt\.workbuddy\tmp\install.log" 2>&1
+rem Run from the repo root: paths below are relative on purpose (the repo must not
+rem contain personal absolute paths). Toolchain paths come from scripts\local.env.ps1.
+if not exist ".workbuddy\tmp" mkdir ".workbuddy\tmp"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\install.ps1" > ".workbuddy\tmp\install.log" 2>&1
 if errorlevel 1 exit 1

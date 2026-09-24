@@ -8,8 +8,9 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
-$adb = "<LOCAL_HOME>\AppData\Local\Android\Sdk\platform-tools\adb.exe"
-$tmp = "<LOCAL_HOME>\WorkBuddy\ReadIt\.workbuddy\tmp"
+. (Join-Path $PSScriptRoot "env.ps1")
+$adb = $ReadItAdb
+$tmp = Join-Path $ReadItRoot ".workbuddy\tmp"
 
 # clean slate: force-stop then relaunch shelf so the list is fully built before we tap
 & $adb shell am force-stop com.readit.eink 2>&1 | Out-Null

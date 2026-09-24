@@ -8,8 +8,9 @@
 param([string]$Serial = "")
 
 $ErrorActionPreference = "Continue"
-$adb = "<LOCAL_HOME>\AppData\Local\Android\Sdk\platform-tools\adb.exe"
-$apkDir = "<LOCAL_HOME>\WorkBuddy\ReadIt\app\build\outputs\apk\debug"
+. (Join-Path $PSScriptRoot "env.ps1")
+$adb = $ReadItAdb
+$apkDir = Join-Path $ReadItRoot "app\build\outputs\apk\debug"
 
 # adb needs one unambiguous target when several devices are plugged in.
 $devices = @(& $adb devices 2>$null | Select-String "device$" | ForEach-Object { ($_ -split "\s+")[0] })

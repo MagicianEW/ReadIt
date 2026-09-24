@@ -25,8 +25,9 @@ sys.stdout.reconfigure(encoding="utf-8")
 
 import fitz  # PyMuPDF
 
-OUT = r"<LOCAL_HOME>\WorkBuddy\ReadIt\.workbuddy\tmp\testbooks\08_pdf_scanimg_10p.pdf"
-PNG = r"<LOCAL_HOME>\WorkBuddy\ReadIt\.workbuddy\tmp\scan_page.png"
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+OUT = os.path.join(_ROOT, ".workbuddy", "tmp", "testbooks", "08_pdf_scanimg_10p.pdf")
+PNG = os.path.join(_ROOT, ".workbuddy", "tmp", "scan_page.png")
 
 W, H = 1240, 1754
 BG = 236      # 纸底灰

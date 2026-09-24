@@ -1,39 +1,56 @@
-# ReadIt / 阅即 — 本地构建脚本
-# 用法（PowerShell）：
-#   .\scripts\build.ps1                # 编译 debug 包
-#   .\scripts\build.ps1 -Task test     # 跑单元测试
-#   .\scripts\build.ps1 -Clean         # 先 clean 再编译
+# ReadIt / build helper - single gradle entry point for all .cmd wrappers.
 #
-# 说明：本机 services.gradle.org 不通，构建统一走 ~/.gradle/wrapper/dists 里的 Gradle 8.13 缓存。
+# Usage (PowerShell, from anywhere; paths are resolved from the script location):
+#   powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Task assembleDebug
+#   powershell -ExecutionPolicy Bypass -File scripts\build.ps1 -Task "clean testDebugUnitTest assembleDebug"
+#
+# Task tokens are whitespace/comma separated. Tokens starting with "-" are passed
+# to gradle as flags (e.g. --rerun, --stacktrace); "clean" stays a root-project
+# task; anything else is prefixed with ":app:".
+#
+# Toolchain resolution (no personal paths in the repo):
+#   scripts\env.ps1 -> scripts\local.env.ps1 (gitignored, per machine) -> env vars.
+# Gradle is invoked through the repo's own gradlew.bat. Output is tee'd into
+# .workbuddy\tmp\<log> and the gradle exit code is returned to the caller.
+#
+# ASCII only on purpose (PowerShell 5.1 + non-ASCII script bytes is a known trap).
 
 param(
     [string]$Task = "assembleDebug",
-    [switch]$Clean
+    [switch]$Clean,
+    [string]$Log = "build.log",
+    [switch]$Stacktrace
 )
 
 $ErrorActionPreference = "Continue"
 $ProgressPreference = 'SilentlyContinue'
 
-$root = Split-Path -Parent $PSScriptRoot
-$env:JAVA_HOME = "<LOCAL_TOOLS>\jdk\jdk-17"
-$env:ANDROID_HOME = "<LOCAL_HOME>\AppData\Local\Android\Sdk"
-$env:ANDROID_SDK_ROOT = "<LOCAL_HOME>\AppData\Local\Android\Sdk"
+. (Join-Path $PSScriptRoot "env.ps1")
+$root = $ReadItRoot
 
-$gradle = "<LOCAL_HOME>\.gradle\wrapper\dists\gradle-8.13-bin\5xuhj0ry160q40clulazy9h7d\gradle-8.13\bin\gradle.bat"
-if (-not (Test-Path $gradle)) {
-    throw "未找到缓存的 Gradle 8.13：$gradle"
+$gradlew = Join-Path $root "gradlew.bat"
+if (-not (Test-Path $gradlew)) { throw "gradlew.bat not found: $gradlew" }
+
+$logPath = Join-Path (Join-Path $root ".workbuddy\tmp") $Log
+New-Item -ItemType Directory -Path (Split-Path $logPath) -Force | Out-Null
+
+$taskList = @($Task -split "[\s,]+" | Where-Object { $_ })
+$argsList = @("-p", $root, "--console=plain")
+if ($Clean -and ($taskList -notcontains "clean")) { $argsList += "clean" }
+if ($Stacktrace) { $argsList += "--stacktrace" }
+foreach ($t in $taskList) {
+    if ($t.StartsWith("-")) { $argsList += $t }
+    elseif ($t -eq "clean") { $argsList += "clean" }
+    else { $argsList += ":app:$t" }
 }
 
-$log = Join-Path $root ".workbuddy\tmp\build.log"
-New-Item -ItemType Directory -Path (Split-Path $log) -Force | Out-Null
-
-$argsList = @("-p", $root, "--console=plain")
-if ($Clean) { $argsList += "clean" }
-$argsList += ":app:$Task"
-
 Write-Host "JAVA_HOME=$env:JAVA_HOME"
-Write-Host "gradle -> $gradle"
-Write-Host "task   -> :app:$Task"
+Write-Host "ANDROID_HOME=$env:ANDROID_HOME"
+Write-Host "gradlew -> $gradlew"
+Write-Host "tasks   -> $($argsList -join ' ')"
 
-& $gradle $argsList *>&1 | Tee-Object -FilePath $log
+# Out-File utf8, not Tee-Object: PS 5.1 Tee-Object always writes UTF-16LE, which
+# breaks every grep-based log check downstream.
+& $gradlew @argsList *>&1 | Out-File -FilePath $logPath -Encoding utf8
+Write-Host "log -> $logPath"
 exit $LASTEXITCODE

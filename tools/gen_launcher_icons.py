@@ -17,7 +17,7 @@ import os
 import struct
 import zlib
 
-OUT_ROOT = r"<LOCAL_HOME>\WorkBuddy\ReadIt\app\src\main\res"
+OUT_ROOT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "app", "src", "main", "res")
 
 # density 目录 -> 边长（px）
 SIZES = {

@@ -8,8 +8,9 @@
 # ASCII only on purpose (PowerShell 5.1 + non-ASCII script bytes is a known trap).
 $ErrorActionPreference = "Continue"
 
-$adb = "<LOCAL_HOME>\AppData\Local\Android\Sdk\platform-tools\adb.exe"
-$root = "<LOCAL_HOME>\WorkBuddy\ReadIt"
+. (Join-Path $PSScriptRoot "env.ps1")
+$adb = $ReadItAdb
+$root = $ReadItRoot
 $out = Join-Path $root ".workbuddy\tmp\smoke"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
