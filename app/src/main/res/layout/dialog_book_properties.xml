@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  书籍属性对话框（书架长按 → 属性）。
+
+  E-Ink 纯黑白：无卡片、无圆角、无分隔阴影，只用文字层级（主色 = 值，次色 = 标签）。
+  四行固定：阅读进度 / 总体字数 / 章节数 / 加入书库时间；拿不到的项显示「—」。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="20dp"
+    android:paddingEnd="20dp"
+    android:paddingTop="4dp"
+    android:paddingBottom="12dp">
+
+    <include
+        android:id="@+id/row_progress"
+        layout="@layout/prop_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <include
+        android:id="@+id/row_chars"
+        layout="@layout/prop_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <include
+        android:id="@+id/row_chapters"
+        layout="@layout/prop_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+    <include
+        android:id="@+id/row_added"
+        layout="@layout/prop_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content" />
+
+</LinearLayout>

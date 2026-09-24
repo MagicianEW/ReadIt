@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      MEDIUM 档（sw400dp ~ sw599dp），与 ScreenProfile.UiSizeClass.MEDIUM 对齐。
+
+      为什么要有这一桶：原来只有 `values-sw600dp` 一个断点，而实测三台机器**一台都没命中**
+      —— Civi2 是 1080x2400@440dpi 只有 sw393dp（属 COMPACT，本就正确），
+      但 EPD106 是 758x1024@212dpi 约 sw572dp，屏幕明显更大却仍拿到 COMPACT 的紧凑尺寸。
+      补上这一桶后，这类「像素不小、dpi 偏低」的墨水屏才会真正用上更大的图标与热区。
+    -->
+    <dimen name="toolbar_icon_size">40dp</dimen>
+    <dimen name="touch_target_min">52dp</dimen>
+    <dimen name="text_size_min">11sp</dimen>
+    <dimen name="text_size_default">15sp</dimen>
+</resources>

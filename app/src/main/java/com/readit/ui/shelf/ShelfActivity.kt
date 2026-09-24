@@ -17,6 +17,9 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.readit.core.util.ReadItLog
+import com.readit.data.BookMetaScanner
+import com.readit.data.ProgressStore
+import com.readit.data.buildBookMetaView
 import com.readit.data.prefs.ReadItPrefs
 import com.readit.data.stats.ReadingStats
 import com.readit.data.stats.ReadingStatsStore
@@ -31,11 +34,15 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.Executors
 
 /**
  * 书架（P1）。600×800 兜底：按钮最小热区 48dp，列表项 48dp。
  */
 class ShelfActivity : AppCompatActivity() {
+
+    /** 后台元数据扫描串行执行器：避免反复进书架时叠加多个全库扫描线程 */
+    private val metaScanExecutor = Executors.newSingleThreadExecutor { r -> Thread(r, "readit-metascan") }
 
     private lateinit var adapter: BookAdapter
 
@@ -76,6 +83,8 @@ class ShelfActivity : AppCompatActivity() {
         val books = StorageManager.listBooks(this)
         adapter.submit(books)
         empty.visibility = if (books.isEmpty()) View.VISIBLE else View.GONE
+        // 后台增量扫描：只对没算过 / 文件变了的书算元数据（全库扫描但非阻塞、可缓存）
+        metaScanExecutor.submit { runCatching { BookMetaScanner.scanLibrary(this) } }
     }
 
     private fun openBook(file: File) {
@@ -84,19 +93,69 @@ class ShelfActivity : AppCompatActivity() {
 
     // ---------------------------------------------------------------- 书架管理：重命名 / 删除
 
-    /** 长按一本书 → 选重命名 / 删除。点按仍然是「打开」，不改动原有习惯。 */
+    /** 长按一本书 → 选重命名 / 删除 / 属性。点按仍然是「打开」，不改动原有习惯。 */
     private fun showBookMenu(file: File) {
-        val actions = arrayOf(getString(R.string.action_rename), getString(R.string.action_delete))
+        val actions = arrayOf(
+            getString(R.string.action_rename),
+            getString(R.string.action_delete),
+            getString(R.string.action_properties)
+        )
         AlertDialog.Builder(this)
             .setTitle(file.name)
             .setItems(actions) { _, which ->
                 when (which) {
                     0 -> askRename(file)
                     1 -> confirmDelete(file)
+                    2 -> showBookProperties(file)
                 }
             }
             .setNegativeButton(R.string.action_cancel, null)
             .show()
+    }
+
+    /**
+     * 长按 → 属性：对话框显示 阅读进度 / 总体字数 / 章节数 / 加入书库时间。
+     *
+     * 元数据在后台线程算（PDF / DOCX / EPUB 解析可能慢），先填「计算中…」，
+     * 算完回主线程填真实值。已算过且文件没变的本书走 [BookMetaScanner.ensure] 命中缓存，
+     * 基本瞬间返回。
+     */
+    private fun showBookProperties(file: File) {
+        val view = layoutInflater.inflate(R.layout.dialog_book_properties, null)
+        val computing = getString(R.string.prop_computing)
+        val vProgress = bindPropRow(view, R.id.row_progress, R.string.prop_progress, computing)
+        val vChars = bindPropRow(view, R.id.row_chars, R.string.prop_chars, computing)
+        val vChapters = bindPropRow(view, R.id.row_chapters, R.string.prop_chapters, computing)
+        val vAdded = bindPropRow(view, R.id.row_added, R.string.prop_added, computing)
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.prop_title)
+            .setView(view)
+            .setPositiveButton(R.string.action_confirm, null)
+            .show()
+
+        metaScanExecutor.submit {
+            val meta = runCatching { BookMetaScanner.ensure(this, file) }.getOrDefault(
+                com.readit.data.BookMeta()
+            )
+            val pos = ProgressStore.load(this, file.name)
+            val vm = buildBookMetaView(meta, pos)
+            runOnUiThread {
+                vProgress.text = vm.progressText
+                vChars.text = vm.charCountText
+                vChapters.text = vm.chapterText
+                vAdded.text = vm.addedAtText
+            }
+        }
+    }
+
+    /** 给属性对话框的一行设好标签，初值填 [initial]，返回值 TextView 供后续更新 */
+    private fun bindPropRow(container: View, includeId: Int, labelRes: Int, initial: String): TextView {
+        val inc = container.findViewById<View>(includeId)
+        inc.findViewById<TextView>(R.id.tvLabel).setText(labelRes)
+        val value = inc.findViewById<TextView>(R.id.tvValue)
+        value.text = initial
+        return value
     }
 
     /**

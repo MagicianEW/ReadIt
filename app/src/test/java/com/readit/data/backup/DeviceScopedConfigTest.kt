@@ -46,8 +46,18 @@ class DeviceScopedConfigTest {
     }
 
     @Test
-    fun `only perf tier and refresh mode are device scoped`() {
-        assertEquals(setOf("perfTier", "refreshMode"), DeviceScopedConfig.KEYS)
+    fun `only tier refresh and render mode are device scoped`() {
+        assertEquals(
+            setOf("perfTier", "refreshMode", "renderMode"),
+            DeviceScopedConfig.KEYS
+        )
+    }
+
+    /** 渲染模式也是设备属性：墨水屏的「锐利」搬到 LCD 上会满屏锯齿 */
+    @Test
+    fun `render mode follows the same device scoped rule`() {
+        assertTrue(DeviceScopedConfig.keepLocal(DeviceScopedConfig.KEY_RENDER_MODE, true))
+        assertFalse(DeviceScopedConfig.keepLocal(DeviceScopedConfig.KEY_RENDER_MODE, false))
     }
 
     @Test

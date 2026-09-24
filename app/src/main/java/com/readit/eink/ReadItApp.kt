@@ -2,8 +2,10 @@ package com.readit.eink
 
 import android.app.Application
 import androidx.multidex.MultiDexApplication
+import com.readit.core.display.ScreenProfileDetector
 import com.readit.core.util.Metrics
 import com.readit.core.util.ReadItLog
+import com.readit.data.prefs.ReadItPrefs
 import com.readit.sync.SyncScheduler
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 
@@ -36,6 +38,20 @@ class ReadItApp : MultiDexApplication() {
         // PdfTextExtractor / PdfBoxBookmarks 调用；super.onCreate() 已完成 multidex 安装。
         // ------------------------------------------------------------------
         PDFBoxResourceLoader.init(this)
+
+        // ------------------------------------------------------------------
+        // 屏幕画像（首次打开即检测）
+        //
+        // 之前应用完全不感知屏幕：分辨率只在设备画像匹配里被读一下，UI 尺寸全靠
+        // `values-sw600dp` 一个断点 —— 而实测三台机器一台都没命中（Civi2 是 sw393dp、
+        // EPD106 约 sw572dp），于是 758px 和 480px 的机器拿到完全相同的一套尺寸。
+        // 这里把「分辨率 / 密度 / UI 档位 / 渲染模式 / 系统是否在缩放合成」一次性算清并落日志，
+        // 渲染模式随后由 ReaderActivity 取用（AUTO 时按是否疑似墨水屏解析成平滑或锐利）。
+        //
+        // 整段包 runCatching：检测只做记录与选默认，**绝不允许它把启动带崩**。
+        // ------------------------------------------------------------------
+        runCatching { ScreenProfileDetector.detect(this, ReadItPrefs.get(this).renderMode) }
+            .onFailure { ReadItLog.w("screen profile detect failed（不影响启动）: ${it.message}") }
 
         // 定时同步（§2.3 A1）：只在主进程校准一次；:converter 进程不需要，也没必要重复调度
         //

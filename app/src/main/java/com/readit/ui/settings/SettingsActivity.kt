@@ -16,6 +16,9 @@ import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SeekBarPreference
 import androidx.preference.SwitchPreferenceCompat
+import com.readit.core.display.RenderMode
+import com.readit.core.display.ScreenProfileDetector
+import com.readit.core.display.ScreenProfileResult
 import com.readit.core.eal.DeviceRepository
 import com.readit.core.light.ScreenLight
 import com.readit.core.text.Fonts
@@ -111,6 +114,7 @@ class SettingsActivity : AppCompatActivity() {
 
             bindStorage(prefs)
             bindPerformance(prefs)
+            bindDisplay(prefs)
             bindTypography(prefs)
             bindReading(prefs)
             bindLight(prefs)
@@ -235,6 +239,69 @@ class SettingsActivity : AppCompatActivity() {
                     findPreference<Preference>("eal_summary")?.summary = Eal.describe()
                 }
             }
+        }
+
+        // ------------------------------------------------------------ 屏幕适配
+
+        /**
+         * 显示：渲染模式 + 屏幕诊断信息。
+         *
+         * 渲染模式小结特意显示成「自动（当前：锐利）」而不是只显示「自动」：
+         * AUTO 的解析结果随设备变（疑似墨水屏 -> 锐利），只显示「自动」等于没告诉用户
+         * 现在到底在用什么模式，排查「发虚」时会少一条关键线索。
+         */
+        private fun bindDisplay(prefs: ReadItPrefs) {
+            val profile = ScreenProfileDetector.detect(requireContext(), prefs.renderMode)
+
+            val render = findPreference<ListPreference>("render_mode")
+            render?.value = prefs.renderMode.key
+            render?.summary = renderModeLabel(prefs.renderMode, profile.renderMode)
+            render?.setOnPreferenceChangeListener { _, newValue ->
+                val mode = RenderMode.from(newValue as? String)
+                prefs.renderMode = mode
+                val p = ScreenProfileDetector.detect(requireContext(), mode)
+                render.summary = renderModeLabel(mode, p.renderMode)
+                true
+            }
+
+            findPreference<Preference>("screen_info")?.summary = screenInfoLabel(profile)
+        }
+
+        private fun renderModeLabel(preference: RenderMode, resolved: RenderMode): String =
+            if (preference == RenderMode.AUTO) {
+                getString(R.string.render_mode_auto_resolved, resolvedLabel(resolved))
+            } else {
+                resolvedLabel(resolved)
+            }
+
+        private fun resolvedLabel(mode: RenderMode): String = when (mode) {
+            RenderMode.SHARP -> getString(R.string.render_mode_sharp)
+            RenderMode.SMOOTH -> getString(R.string.render_mode_smooth)
+            RenderMode.AUTO -> getString(R.string.render_mode_auto)
+        }
+
+        private fun screenInfoLabel(p: ScreenProfileResult): String {
+            val m = p.metrics
+            val sb = StringBuilder()
+            sb.append("${m.panelWidthPx}×${m.panelHeightPx} · ${m.densityDpi}dpi · sw${m.swDp}dp")
+            sb.append('\n').append(getString(R.string.screen_info_class, p.sizeClass.key))
+            if (p.metrics.panelWidthPx != p.metrics.appWidthPx) {
+                sb.append('\n')
+                    .append(getString(R.string.screen_info_app_size, m.appWidthPx, m.appHeightPx))
+            }
+            if (p.densityRatio > 0f && kotlin.math.abs(p.densityRatio - 1f) > 0.05f) {
+                // 只做展示：厂商把分档设得与物理 dpi 不同是常态（Civi2 就是 401.7/440），
+                // 不代表画面被缩放 —— 别把它写成告警。
+                sb.append('\n').append(
+                    getString(R.string.screen_info_physical_dpi, "%.0f".format(p.physicalDpi))
+                )
+            }
+            if (p.scaledBySystem) {
+                sb.append('\n').append(
+                    getString(R.string.screen_info_scaled, "%.2f".format(p.panelScale))
+                )
+            }
+            return sb.toString()
         }
 
         // ------------------------------------------------------------ 阅读与解析

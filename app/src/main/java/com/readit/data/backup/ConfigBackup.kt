@@ -3,6 +3,7 @@ package com.readit.data.backup
 import android.content.Context
 import android.net.Uri
 import com.google.gson.Gson
+import com.readit.core.display.RenderMode
 import com.readit.core.eal.PerfTier
 import com.readit.core.eal.RefreshMode
 import com.readit.core.text.Fonts
@@ -38,6 +39,8 @@ object ConfigBackup {
         val exportedAt: Long = 0L,
         val perfTier: String = PerfTier.AUTO.key,
         val refreshMode: String = RefreshMode.AUTO.key,
+        /** 文字渲染模式（设备属性）。老备份没有这个字段 —— 缺省 AUTO，行为与升级前一致 */
+        val renderMode: String = RenderMode.AUTO.key,
         val fontSizeSp: Float = ReadItPrefs.DEFAULT_FONT_SIZE_SP,
         val fontFamily: String = ReadItPrefs.DEFAULT_FONT_FAMILY,
         val lineSpacing: Float = ReadItPrefs.DEFAULT_LINE_SPACING,
@@ -57,7 +60,7 @@ object ConfigBackup {
     ) {
         /** 一行式摘要，用于回显 */
         fun summary(): String =
-            "档位 $perfTier · 刷新 $refreshMode · 字号 ${fontSizeSp}sp · 按键映射 ${keyMaps.size} 条"
+            "档位 $perfTier · 刷新 $refreshMode · 渲染 $renderMode · 字号 ${fontSizeSp}sp · 按键映射 ${keyMaps.size} 条"
     }
 
     // ------------------------------------------------------------------ 导出
@@ -67,6 +70,7 @@ object ConfigBackup {
         exportedAt = System.currentTimeMillis(),
         perfTier = prefs.perfTier.key,
         refreshMode = prefs.refreshMode.key,
+        renderMode = prefs.renderMode.key,
         fontSizeSp = prefs.fontSizeSp,
         fontFamily = prefs.fontFamily,
         lineSpacing = prefs.lineSpacing,
@@ -133,6 +137,12 @@ object ConfigBackup {
         } else {
             prefs.refreshMode = RefreshMode.from(s.refreshMode)
         }
+        // 渲染模式同理：墨水屏的「锐利」搬到 LCD 上会满屏锯齿，反之会发虚。
+        if (DeviceScopedConfig.keepLocal(DeviceScopedConfig.KEY_RENDER_MODE, prefs.hasExplicitRenderMode)) {
+            ReadItLog.i("config restore: 本机已显式设置渲染模式 ${prefs.renderMode.key}，忽略备份里的 ${s.renderMode}")
+        } else {
+            prefs.renderMode = RenderMode.from(s.renderMode)
+        }
 
         prefs.fontSizeSp = s.fontSizeSp
         // 字体：备份可能来自另一台设备，用户字体未必在；这里只做「内置/非空」校正，
@@ -175,7 +185,7 @@ object ConfigBackup {
         // 两行分开记：第一行是「备份里写的什么」，第二行是「实际落到本机的是什么」。
         // 档位/刷新可能被上面保留本机而没生效，合成一行会看不出来。
         ReadItLog.i("config restored: keys=$restored 备份内容[${s.summary()}]")
-        ReadItLog.i("config effective: 档位 ${prefs.perfTier.key} · 刷新 ${prefs.refreshMode.key} · 字号 ${prefs.fontSizeSp}sp")
+        ReadItLog.i("config effective: 档位 ${prefs.perfTier.key} · 刷新 ${prefs.refreshMode.key} · 渲染 ${prefs.renderMode.key} · 字号 ${prefs.fontSizeSp}sp")
         return restored
     }
 

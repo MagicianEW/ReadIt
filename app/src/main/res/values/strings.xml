@@ -38,6 +38,7 @@
     <string name="action_back">返回</string>
     <string name="action_rename">重命名</string>
     <string name="action_delete">删除</string>
+    <string name="action_properties">属性</string>
     <string name="import_ok">已导入：%1$s</string>
     <string name="import_failed">导入失败</string>
     <string name="read_failed">读取失败</string>
@@ -56,6 +57,13 @@
     <string name="delete_message">确定删除《%1$s》吗？\n\n文件会从书籍目录里永久删除，且不可撤销。阅读进度与此书的编码记忆会一并清除。</string>
     <string name="delete_ok">已删除：%1$s</string>
     <string name="delete_failed">删除失败：%1$s（目录可能只读）</string>
+    <!-- 书架长按：属性 -->
+    <string name="prop_title">书籍属性</string>
+    <string name="prop_progress">进度</string>
+    <string name="prop_chars">字数</string>
+    <string name="prop_chapters">章节</string>
+    <string name="prop_added">加入时间</string>
+    <string name="prop_computing">计算中…</string>
     <!-- F15 手动选择编码 -->
     <string name="encoding_pick_title">选择文件编码</string>
     <string name="encoding_still_garbled">用 %1$s 解码仍然不对，请再选一种</string>
@@ -238,7 +246,19 @@
 
     <!-- Settings -->
     <string name="cat_performance">性能与显示</string>
+    <string name="cat_display">屏幕适配</string>
     <string name="cat_typography">字体与排版</string>
+
+    <string name="pref_render_mode">文字渲染模式</string>
+    <string name="pref_screen_info">屏幕信息</string>
+    <string name="render_mode_auto">自动</string>
+    <string name="render_mode_smooth">平滑</string>
+    <string name="render_mode_sharp">锐利</string>
+    <string name="render_mode_auto_resolved">自动（当前：%1$s）</string>
+    <string name="screen_info_class">UI 档位：%1$s</string>
+    <string name="screen_info_app_size">应用可见：%1$d×%2$d（与面板不一致，画面被缩放合成）</string>
+    <string name="screen_info_physical_dpi">物理约 %1$sdpi（与系统分档不同属正常，不影响清晰度）</string>
+    <string name="screen_info_scaled">⚠ 系统缩放合成 %1$s× —— 文字被重采样，应用侧无法修正</string>
     <string name="cat_reading">阅读与解析</string>
     <string name="cat_light">屏幕灯</string>
     <string name="cat_sync">WebDAV 同步</string>
@@ -376,5 +396,17 @@
         <item>FAST</item>
         <item>REGAL</item>
         <item>SYSTEM</item>
+    </string-array>
+
+    <!-- 文字渲染模式：平滑 = 抗锯齿（LCD 观感最顺）；锐利 = 点对点（1bit 墨水屏不发虚） -->
+    <string-array name="render_mode_entries">
+        <item>自动（按屏幕判断）</item>
+        <item>平滑（抗锯齿，LCD 更顺）</item>
+        <item>锐利（点对点，墨水屏不发虚）</item>
+    </string-array>
+    <string-array name="render_mode_values">
+        <item>AUTO</item>
+        <item>SMOOTH</item>
+        <item>SHARP</item>
     </string-array>
 </resources>

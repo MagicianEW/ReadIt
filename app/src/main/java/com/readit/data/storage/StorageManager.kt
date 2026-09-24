@@ -2,6 +2,7 @@ package com.readit.data.storage
 
 import android.content.Context
 import com.readit.core.util.ReadItLog
+import com.readit.data.BookMetaStore
 import com.readit.data.BookmarkStore
 import com.readit.data.ProgressStore
 import com.readit.data.prefs.ReadItPrefs
@@ -267,6 +268,8 @@ object StorageManager {
         // F26 / F25：统计与书签也是「按书名索引」的记忆，同一条纪律
         ReadingStatsStore.move(app, file.name, newFileName)
         BookmarkStore.move(app, file.name, newFileName)
+        // 书籍属性元数据（加入书库时间等）同理，一并搬到新名字
+        BookMetaStore.move(app, file.name, newFileName)
         ReadItLog.i("book renamed: ${file.name} -> $newFileName")
         return dest
     }
@@ -279,5 +282,7 @@ object StorageManager {
         ReadingStatsStore.delete(context, bookId)
         // F25：书签同理
         BookmarkStore.delete(context, bookId)
+        // 书籍属性元数据同理
+        BookMetaStore.delete(context, bookId)
     }
 }

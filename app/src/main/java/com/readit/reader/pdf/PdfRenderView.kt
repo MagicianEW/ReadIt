@@ -13,6 +13,7 @@ import android.os.Looper
 import android.util.AttributeSet
 import android.view.View
 import com.readit.core.display.Inversion
+import com.readit.core.display.RenderMode
 import com.readit.core.util.ReadItLog
 import com.readit.pdf.PdfBookmark
 import com.readit.pdf.PdfCore
@@ -42,6 +43,23 @@ class PdfRenderView @JvmOverloads constructor(
 
     private val core = PdfCore(context)
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply { isAntiAlias = true }
+
+    /**
+     * 文字渲染模式（[RenderMode]），与 TXT 侧同一口径。
+     *
+     * PDF 走的是位图缩放：平滑模式保留双线性过滤（`FILTER_BITMAP`）与抗锯齿，
+     * 锐利模式两者都关 —— 扫描件放大后边缘不再被插值成灰雾，像素边界清楚。
+     */
+    var renderMode: RenderMode = RenderMode.SMOOTH
+        set(value) {
+            if (field != value) {
+                field = value
+                val sharp = value == RenderMode.SHARP
+                paint.isAntiAlias = !sharp
+                paint.isFilterBitmap = !sharp
+                invalidate()
+            }
+        }
 
     /**
      * 反色用的颜色矩阵滤镜（F27）。

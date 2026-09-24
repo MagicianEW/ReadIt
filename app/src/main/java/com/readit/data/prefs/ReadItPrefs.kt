@@ -2,6 +2,7 @@ package com.readit.data.prefs
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.readit.core.display.RenderMode
 import com.readit.core.eal.PerfTier
 import com.readit.core.eal.RefreshMode
 
@@ -15,6 +16,8 @@ class ReadItPrefs(private val sp: SharedPreferences) {
 
         private const val K_PERF_TIER = "perf_tier"
         private const val K_REFRESH_MODE = "refresh_mode"
+        /** 文字渲染模式。**注意与 [K_REFRESH_MODE]（E-Ink 刷新模式）是两个不同的东西** */
+        private const val K_RENDER_MODE = "render_mode"
         private const val K_FONT_SIZE_SP = "font_size_sp"
         private const val K_FONT_FAMILY = "font_family"
         private const val K_LINE_SPACING = "line_spacing"
@@ -84,6 +87,24 @@ class ReadItPrefs(private val sp: SharedPreferences) {
 
     /** 同 [hasExplicitPerfTier]，作用于刷新模式 */
     val hasExplicitRefreshMode: Boolean get() = sp.contains(K_REFRESH_MODE)
+
+    /**
+     * 文字渲染模式（[RenderMode]）：平滑（抗锯齿）/ 锐利（点对点）。
+     *
+     * 默认 [RenderMode.AUTO] —— 每次取用时按「是否疑似墨水屏」解析（见 [ScreenProfile]），
+     * **不落盘具体值**：换设备、换 ROM 后结论可能变，落盘会锁死旧结论。
+     */
+    var renderMode: RenderMode
+        get() = RenderMode.from(sp.getString(K_RENDER_MODE, RenderMode.AUTO.key))
+        set(v) = sp.edit().putString(K_RENDER_MODE, v.key).apply()
+
+    /**
+     * 同 [hasExplicitPerfTier]，作用于渲染模式。
+     *
+     * 渲染模式也是**设备属性**（墨水屏该锐利、LCD 该平滑），
+     * 所以跨设备恢复配置时同样只在「本机没显式选过」时才接受备份值。
+     */
+    val hasExplicitRenderMode: Boolean get() = sp.contains(K_RENDER_MODE)
 
     var fontSizeSp: Float
         get() = com.readit.core.text.Fonts.clampFontSizeSp(sp.getFloat(K_FONT_SIZE_SP, DEFAULT_FONT_SIZE_SP))

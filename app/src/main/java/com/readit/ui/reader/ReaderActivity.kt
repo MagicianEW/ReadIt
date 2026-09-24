@@ -36,6 +36,9 @@ import com.readit.core.text.Fonts
 import com.readit.core.text.UserFonts
 import com.readit.core.text.EncodingDetector
 import com.readit.core.display.Inversion
+import com.readit.core.display.RenderMode
+import com.readit.core.display.ScreenProfile
+import com.readit.core.display.ScreenProfileDetector
 import com.readit.core.util.Metrics
 import com.readit.core.util.ReadItLog
 import com.readit.data.Bookmark
@@ -309,6 +312,9 @@ class ReaderActivity : AppCompatActivity() {
         canvas.fontSizeSp = prefs.fontSizeSp
         canvas.lineSpacing = prefs.lineSpacing
         canvas.marginDp = prefs.marginDp
+        // 渲染模式：AUTO 在这里解析成实际生效值（疑似墨水屏 -> SHARP）。
+        // 必须**先于** fontSizeSp 生效相关的重排，避免多一次 rebuild。
+        canvas.renderMode = resolvedRenderMode()
         val openTf = UserFonts.typefaceFor(this, fontId())
         canvas.typeface = openTf
         ReadItLog.i("font at open: id=${fontId()} typeface=${openTf ?: "null(keep default)"}")
@@ -397,6 +403,7 @@ class ReaderActivity : AppCompatActivity() {
         pdfView?.let { return it }
         val v = PdfRenderView(this)
         v.inverted = prefs.invertEnabled
+        v.renderMode = resolvedRenderMode()
         stage.addView(v, fullStageParams())
         pdfView = v
         return v
@@ -1035,6 +1042,15 @@ class ReaderActivity : AppCompatActivity() {
 
     private fun fontPercent(): Int =
         (prefs.fontSizeSp / BASE_FONT_SP * 100).roundToInt().coerceIn(MIN_FONT_PERCENT, MAX_FONT_PERCENT)
+
+    /**
+     * 把 prefs 里的渲染偏好（可能是 AUTO）解析成实际生效的 [RenderMode]。
+     *
+     * AUTO 每次取用都重新判定，不落盘：换设备 / 换 ROM 后「是否疑似墨水屏」的结论会变，
+     * 把旧结论写死进配置反而会锁死错误结果。判定逻辑与判据见 [ScreenProfile]。
+     */
+    private fun resolvedRenderMode(): RenderMode =
+        ScreenProfile.resolveRenderMode(prefs.renderMode, ScreenProfileDetector.einkLikely(this))
 
     /**
      * 按当前档位构造 PDF 文本抽取器：LOW 档把 PdfBox 的解码缓冲落到 `cacheDir`

@@ -7,7 +7,8 @@ package com.readit.data.backup
  *
  * [ConfigBackup.Snapshot] 里有两类字段混在一起：
  *  - **账号偏好**：字号 / 字体 / 行距 / 边距 / 反色 / 扫描阈值 / WebDAV 地址…… 换设备后照搬是对的；
- *  - **设备属性**：`perfTier`（性能档位）、`refreshMode`（刷新模式）—— 它们描述的是**这台设备的硬件能力**。
+ *  - **设备属性**：`perfTier`（性能档位）、`refreshMode`（刷新模式）、`renderMode`（文字渲染模式）
+ *    —— 它们描述的都是**这台设备的硬件特性**，换设备照搬就会出问题。
  *
  * 真机实测（小米 Civi2 恢复 KY-01L 的云端备份）暴露了后果：
  *
@@ -41,8 +42,15 @@ object DeviceScopedConfig {
     const val KEY_PERF_TIER = "perfTier"
     const val KEY_REFRESH_MODE = "refreshMode"
 
+    /**
+     * 文字渲染模式（平滑 / 锐利）同样是设备属性：
+     * 墨水屏（1bit 面板）要锐利才不发虚，LCD 要平滑才不难看。
+     * 若把墨水屏的「锐利」搬到 LCD 上，文字会有明显锯齿 —— 与档位同类的跨设备问题。
+     */
+    const val KEY_RENDER_MODE = "renderMode"
+
     /** 属于「设备属性」的配置键：跨设备恢复时可能有害 */
-    val KEYS: Set<String> = setOf(KEY_PERF_TIER, KEY_REFRESH_MODE)
+    val KEYS: Set<String> = setOf(KEY_PERF_TIER, KEY_REFRESH_MODE, KEY_RENDER_MODE)
 
     fun isDeviceScoped(key: String): Boolean = key in KEYS
 

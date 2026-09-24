@@ -8,6 +8,8 @@ import android.graphics.Typeface
 import android.util.AttributeSet
 import android.view.View
 import com.readit.core.display.Inversion
+import com.readit.core.display.RenderMode
+import com.readit.core.display.ScreenProfile
 import com.readit.core.util.ReadItLog
 import kotlin.math.max
 
@@ -25,11 +27,30 @@ class TxtCanvasView @JvmOverloads constructor(
     defStyleAttr: Int = 0
 ) : View(context, attrs, defStyleAttr) {
 
+    /**
+     * 文字渲染模式（[RenderMode]）：
+     * - `SMOOTH`（默认）：抗锯齿开启，LCD / 高灰阶屏上边缘最顺；
+     * - `SHARP`：**点对点**。关抗锯齿 + 关亚像素 + 字号吸附整像素 + 基线吸附整像素。
+     *   1bit 墨水屏面板上没有中间灰可抖，笔画边缘就不会发灰发糊（用户反馈的「发虚」）。
+     *
+     * 只在 SHARP 下吸附字号，SMOOTH 保持原有（可为小数）行为 —— 既不影响既有观感，
+     * 也让两种模式的差异可被量化对比（实测见 2026-09-24 的真机灰阶直方图）。
+     */
+    var renderMode: RenderMode = RenderMode.SMOOTH
+        set(value) {
+            if (field != value) {
+                field = value
+                applyRenderMode()
+                rebuild()
+                invalidate()
+            }
+        }
+
     var fontSizeSp: Float = 14f
         set(value) {
             if (field != value) {
                 field = value
-                paint.textSize = value * resources.displayMetrics.scaledDensity
+                applyTextSize()
                 rebuild()
                 invalidate()
             }
@@ -85,6 +106,25 @@ class TxtCanvasView @JvmOverloads constructor(
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Inversion.fontColor(false)
         textSize = fontSizeSp * resources.displayMetrics.scaledDensity
+    }
+
+    /** 按 [renderMode] 设置画笔：抗锯齿 / 亚像素 / 字体微调，并重算字号 */
+    private fun applyRenderMode() {
+        val sharp = renderMode == RenderMode.SHARP
+        // 抗锯齿是「发虚」的主因：笔画边缘被算成中间灰，1bit 面板上只能抖动出来
+        paint.isAntiAlias = !sharp
+        // 亚像素按 RGB 子像素排列补色：单色面板上只会变成脏边，必须关
+        paint.isSubpixelText = false
+        // 字体微调把字干对齐到像素网格，锐利模式下尤其明显
+        paint.hinting = if (sharp) Paint.HINTING_ON else Paint.HINTING_OFF
+        applyTextSize()
+    }
+
+    private fun applyTextSize() {
+        val raw = fontSizeSp * resources.displayMetrics.scaledDensity
+        paint.textSize =
+            if (renderMode == RenderMode.SHARP) ScreenProfile.snapTextSizePx(fontSizeSp, resources.displayMetrics.scaledDensity)
+            else raw
     }
 
     private var fullText: String = ""
@@ -248,7 +288,10 @@ class TxtCanvasView @JvmOverloads constructor(
         canvas.drawColor(Inversion.backColor(inverted))
         val page = pager?.page(pageIndex) ?: return
         val density = resources.displayMetrics.density
-        val marginPx = marginDp * density
+        val sharp = renderMode == RenderMode.SHARP
+        // 锐利模式：起点也吸附到整像素。字级（textSize）吸附了但基线停在半像素上，
+        // 字形仍会跨在两个像素之间 —— 半像素偏移是抗锯齿之外第二个发虚来源。
+        val marginPx = if (sharp) kotlin.math.round(marginDp * density) else marginDp * density
         val fm = paint.fontMetrics
         val lineHeight = (fm.descent - fm.ascent) * lineSpacing
         var y = marginPx - fm.ascent
@@ -266,7 +309,7 @@ class TxtCanvasView @JvmOverloads constructor(
                 if (y > bottomLimit) break
                 val count = paint.breakText(para, start, para.length, true, maxWidth, null)
                 val end = (start + count).coerceAtMost(para.length)
-                canvas.drawText(para, start, end, marginPx, y, paint)
+                canvas.drawText(para, start, end, marginPx, if (sharp) kotlin.math.round(y) else y, paint)
                 y += lineHeight
                 start = end
             }

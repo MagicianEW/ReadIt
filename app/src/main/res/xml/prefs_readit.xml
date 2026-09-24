@@ -55,6 +55,21 @@
             app:title="@string/pref_font_dir" />
     </PreferenceCategory>
 
+    <!-- 屏幕适配：首启检测分辨率/密度后，这里给出结论并允许手动覆盖渲染模式 -->
+    <PreferenceCategory app:title="@string/cat_display">
+        <ListPreference
+            app:defaultValue="AUTO"
+            app:entries="@array/render_mode_entries"
+            app:entryValues="@array/render_mode_values"
+            app:key="render_mode"
+            app:title="@string/pref_render_mode" />
+
+        <Preference
+            app:key="screen_info"
+            app:selectable="false"
+            app:title="@string/pref_screen_info" />
+    </PreferenceCategory>
+
     <PreferenceCategory app:title="@string/cat_reading">
         <SwitchPreferenceCompat
             app:defaultValue="true"
