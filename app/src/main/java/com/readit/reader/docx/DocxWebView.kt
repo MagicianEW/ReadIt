@@ -93,6 +93,9 @@ class DocxWebView @JvmOverloads constructor(
     /** 当前字体（CSS font-family）；页面就绪后会重放一次 */
     private var fontFamily: String = DEFAULT_FONT_FAMILY
 
+    /** 字号百分比（ReaderActivity.fontPercent()，100 = 不变） */
+    private var fontPercent: Int = 100
+
     /** 打包字体的 @font-face 源（相对 baseUrl），null = 用系统/默认族名，不需要下载字体 */
     private var fontFaceSrc: String? = null
 
@@ -150,6 +153,19 @@ class DocxWebView @JvmOverloads constructor(
      * 图片走的就是同一套 file:// 相对路径，能显示说明子资源是放行的。
      * 只要有这条声明，CSS 就会自己去把字体捞回来。
      */
+    /**
+     * 切换字号（百分比，100 = 不变）。
+     *
+     * 用 WebView 原生 textZoom 而不是注入 CSS：textZoom 在文本渲染层按百分比
+     * 缩放**所有**字号（含书内 px 声明），图片与布局盒不动，标题层级自然保持；
+     * 且设置即时生效，无需重载页面。DOCX 转换产物可能带内联 px 字号，
+     * CSS 注入压不住内联样式，textZoom 没有这个盲区。
+     */
+    fun setFontPercent(percent: Int) {
+        fontPercent = percent
+        settings.textZoom = percent
+    }
+
     fun setFontFamily(cssFamily: String, faceSrc: String? = null) {
         fontFamily = cssFamily
         fontFaceSrc = faceSrc

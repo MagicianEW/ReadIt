@@ -37,6 +37,21 @@
             android:padding="12dp"
             android:visibility="gone">
 
+            <!--
+                固定版式提示（PDF / DOCX 原版渲染）：字号 / 行距 / 边距不参与排版。
+                显隐由代码 syncTypographyPanelForMode() 控制，避免「滑条拖了没反应」的错觉
+                （Civi2 真机反馈）。文本类渲染路径（TXT / EPUB / DOCX / PDF 降级文本）不显示。
+            -->
+            <TextView
+                android:id="@+id/tvTypographyHint"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingBottom="4dp"
+                android:text="@string/typography_fixed_hint"
+                android:textColor="@color/readit_fg_secondary"
+                android:textSize="12sp"
+                android:visibility="gone" />
+
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

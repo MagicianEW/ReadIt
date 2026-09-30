@@ -82,6 +82,7 @@
     <string name="label_invert">反色（黑白置换）</string>
     <string name="invert_on_toast">已开启反色</string>
     <string name="invert_off_toast">已关闭反色</string>
+    <string name="typography_fixed_hint">行距 / 边距仅对文本类排版生效；PDF 为固定版式，字号亦不适用</string>
     <!-- 内置字体显示名，顺序必须与 Fonts.builtins() 一致 -->
     <string-array name="font_builtin_labels">
         <item>默认（无衬线）</item>

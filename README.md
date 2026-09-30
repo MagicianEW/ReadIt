@@ -2,7 +2,7 @@
 
 面向墨水屏（E-Ink）Android 设备的本地阅读器。纯黑白、无动效，性能与刷新策略交给设备档位决定。
 
-当前版本：**v0.1.4**（`versionCode 4` / `applicationId com.readit.eink` / minSdk 19 / targetSdk 34）。
+当前版本：**v0.1.5**（`versionCode 5` / `applicationId com.readit.eink` / minSdk 19 / targetSdk 34）。
 
 ## 特性
 
@@ -11,7 +11,7 @@
 - 支持 **TXT / EPUB / DOCX / PDF**
 - TXT 编码自动检测（UTF-8 / GBK 等），判为乱码可手动指定，并按书记住选择
 - **反色**（黑白对调）：排版面板与工具栏一并反色，视觉一致
-- 字号 10–20sp、行距、页边距、字体可选（4 个系统族 + 2 个打包开源字体：思源宋体、霞鹜文楷，OFL 1.1），离线可用
+- 字号 10–20sp **四种格式全生效**：TXT / EPUB / DOCX / PDF 文本路径直改；DOCX 原版渲染走 WebView textZoom；EPUB 对书内绝对 px 字号做规格化注入；PDF 原版渲染为固定版式，面板自动禁用并提示。行距、页边距、字体可选（4 个系统族 + 2 个打包开源字体：思源宋体、霞鹜文楷，OFL 1.1），离线可用
 - CJK 行高按 hhea 的 `descent - ascent` 计算，不被 OS/2 的 `top/bottom` 撑高
 - 章节目录、目录跳转、阅读进度记忆
 

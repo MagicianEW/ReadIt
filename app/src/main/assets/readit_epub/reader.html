@@ -85,6 +85,9 @@
            所以正文靠 rendition.themes.override，画布外圈靠 html/body 的底色。*/
         var inverted = false;
 
+        /* 字号百分比（100 = 不变）。见 applyFontSize()。 */
+        var fontPct = 100;
+
         function fire(name, args) {
             try {
                 var o = window.ReadItBridge;
@@ -114,6 +117,41 @@
             }
         }
 
+        /*
+         * 字号规格化注入：themes.fontSize 只在 body 上给一个百分比，走的是继承链——
+         * 书内 CSS 若对 p/div 等直接声明了绝对 px 字号，子元素自己的声明永远压过继承，
+         * 字号就「调不动」。这里把正文常见文本选择器强制回继承链，根字号由 html 承担：
+         * html 收百分比，正文元素全部 inherit，一层缩放全局生效。
+         * h1~h6 / span 不在列表里：标题层级与小字号脚注标注保留作者原设定。
+         * 每章都是新 iframe 文档，rendered 事件里必须重放。
+         */
+        function applyFontSize() {
+            if (!rendition) {
+                return;
+            }
+            var css = "html{font-size:" + fontPct + "% !important;}" +
+                "body,div,p,li,dd,dt,blockquote,figcaption,td,th{font-size:inherit !important;}";
+            var contents;
+            try {
+                contents = rendition.getContents();
+            } catch (e) {
+                return;
+            }
+            contents.forEach(function (c) {
+                try {
+                    var doc = c.document;
+                    var s = doc.getElementById("readit-font-size");
+                    if (!s) {
+                        s = doc.createElement("style");
+                        s.id = "readit-font-size";
+                        (doc.head || doc.documentElement).appendChild(s);
+                    }
+                    s.textContent = css;
+                } catch (e) {
+                }
+            });
+        }
+
         function hookRendition(r) {
             r.on("rendered", function (section) {
                 var href = "";
@@ -122,6 +160,7 @@
                 } catch (e) {
                 }
                 fire("onRendered", [href, String(Date.now() - renderStart)]);
+                applyFontSize();
             });
             r.on("relocated", function (loc) {
                 if (!loc || !loc.start) {
@@ -151,6 +190,7 @@
                 startCfi = cfi || "";
                 fontFamily = fontFamily || "sans-serif";
                 inverted = !!invert;
+                fontPct = fontPercent || 100;
                 if (typeof window.ePub !== "function") {
                     fire("onError", ["epub.js not loaded"]);
                     return;
@@ -222,12 +262,14 @@
             },
 
             setFont: function (percent) {
+                fontPct = percent || 100;
                 if (rendition) {
                     try {
                         rendition.themes.fontSize(percent + "%");
                     } catch (e) {
                     }
                 }
+                applyFontSize();
             },
 
             setInverted: function (v) {

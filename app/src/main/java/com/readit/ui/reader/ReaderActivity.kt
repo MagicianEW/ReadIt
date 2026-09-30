@@ -363,6 +363,7 @@ class ReaderActivity : AppCompatActivity() {
                 refreshFontOptions()
             }
             panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            syncTypographyPanelForMode()
         }
         // F15 常驻入口：随时改编码，不依赖自动检测是否猜错
         findViewById<Button>(R.id.btnEncoding).setOnClickListener {
@@ -702,6 +703,7 @@ class ReaderActivity : AppCompatActivity() {
         lastDocxHeading = (saved?.chapterIndex ?: 0).coerceAtLeast(0)
         docxBaseDir = converted.baseDir
         dv.setFontFamily(Fonts.cssFamily(fontId()), docxFontFaceSrc(converted.baseDir))
+        dv.setFontPercent(fontPercent())
         dv.load(html, converted.baseDir)
         // 就绪判定在 DocxWebView 内部（onPageFinished 之前会挂起），这里直接调用即可。
         // 早期版本用 dv.post{} 抢在 onPageFinished 之前就 evaluateJavascript，
@@ -913,6 +915,7 @@ class ReaderActivity : AppCompatActivity() {
                     return@runOnUiThread
                 }
                 mode = ReadMode.PDF_TEXT
+                syncTypographyPanelForMode()
                 showOnly(canvas)
                 val chapters = ChapterDetector.detect(text)
                     .takeIf { ChapterDetector.isReliable(it, text.length) } ?: emptyList()
@@ -1341,6 +1344,7 @@ class ReaderActivity : AppCompatActivity() {
                 prefs.fontSizeSp = (value + MIN_FONT).toFloat()
                 canvas.fontSizeSp = prefs.fontSizeSp
                 if (mode == ReadMode.EPUB_FULL) epubView?.setFontPercent(fontPercent())
+                if (mode == ReadMode.DOCX_HTML) docxView?.setFontPercent(fontPercent())
                 syncLabels()
             }
         })
@@ -1366,6 +1370,31 @@ class ReaderActivity : AppCompatActivity() {
             applyInversion(checked)
             toast(getString(if (checked) R.string.invert_on_toast else R.string.invert_off_toast))
         }
+    }
+
+    /**
+     * 排版面板「适用性」同步（Civi2 真机反馈：PDF 下拖字号滑条毫无反应，像坏了）。
+     *
+     * PDF 原版渲染是**固定版式**，字号 / 行距 / 边距都不生效 → 三个滑条全部禁用；
+     * EPUB_FULL / DOCX_HTML 支持字号（各自 WebView 字号 API），但行距 / 边距
+     * 只参与 TxtCanvasView 自绘分页 → 这两个滑条仅在画布模式可用。
+     * 值标签保留——显示的是用户当前偏好，换到支持的路径时照常生效。
+     * 反色开关不受影响（F27 对四条渲染路径都有效）。
+     *
+     * 调用时机：面板每次展开（工具栏按钮与中屏菜单两处切换点）、
+     * 以及 PDF 渲染回落到文本模式时（届时滑条要恢复可用）。
+     */
+    private fun syncTypographyPanelForMode() {
+        // 字号：除 PDF 原版渲染（真·固定版式）外都支持——EPUB_FULL 走 themes.fontSize
+        // + 规格化注入（见 reader.html applyFontSize），DOCX_HTML 走 WebView textZoom。
+        findViewById<SeekBar>(R.id.sbFontSize).isEnabled = mode != ReadMode.PDF_RENDER
+        // 行距 / 边距：只参与 TxtCanvasView 的自绘分页，两条 WebView 路径不适用。
+        val canvasMode = mode == ReadMode.TXT || mode == ReadMode.EPUB_TEXT ||
+            mode == ReadMode.DOCX_TEXT || mode == ReadMode.PDF_TEXT
+        findViewById<SeekBar>(R.id.sbLineSpacing).isEnabled = canvasMode
+        findViewById<SeekBar>(R.id.sbMargin).isEnabled = canvasMode
+        findViewById<View>(R.id.tvTypographyHint).visibility =
+            if (canvasMode) View.GONE else View.VISIBLE
     }
 
     /**
@@ -1569,6 +1598,7 @@ class ReaderActivity : AppCompatActivity() {
             }
             InputMapper.Action.MENU -> {
                 panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+                syncTypographyPanelForMode()
             }
             InputMapper.Action.BACK -> finish()
             InputMapper.Action.NONE -> Unit
