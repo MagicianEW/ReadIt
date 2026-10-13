@@ -2,7 +2,7 @@
 <resources>
     <!--
       EXPANDED 档（sw600dp 及以上），与 ScreenProfile.UiSizeClass.EXPANDED 对齐
-      （图标 44dp / 热区 56dp / 默认字号 16sp）。
+      （热区 56dp / 内边距 16dp）。
 
       顺带修正：这一桶原先写的是 40dp 图标，与新增的 MEDIUM 档（sw400dp，40dp）
       几乎没拉开差距，等于「大屏」和「中屏」尺寸一样、分档形同虚设。
@@ -11,8 +11,6 @@
       758px 的机器到底是几 dp 取决于它的 dpi（EPD106 758px@212dpi 只有约 572dp，
       命中的是 sw400dp 那一桶，不是这一桶）。
     -->
-    <dimen name="toolbar_icon_size">44dp</dimen>
     <dimen name="touch_target_min">56dp</dimen>
-    <dimen name="text_size_min">12sp</dimen>
-    <dimen name="text_size_default">16sp</dimen>
+    <dimen name="reader_padding">16dp</dimen>
 </resources>

@@ -44,13 +44,20 @@ object SyncScheduler {
         val prefs = ReadItPrefs.get(ctx)
         val wanted = SyncCapability.shouldSchedule(api, prefs.syncAutoEnabled, prefs.webDavConfigured)
         val existing = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            // getAllPendingJobs 是 API 24 才有的方法；API 21-23 上一律当作「没挂过」，
-            // 后面 schedule() 用同一个 JOB_ID 再挂一次是幂等的（系统按 id 替换）。
+            // getAllPendingJobs 是 API 24 才有的方法；API 21-23 上没有等价查询。
             runCatching {
                 scheduler.allPendingJobs?.any { it.id == SyncCapability.JOB_ID } == true
             }.getOrDefault(false)
         } else {
-            false
+            // API 21-23：查不到「是否已挂」，但**不能**因此当成「没挂过」。
+            // schedule() 对同一 id 是**替换**语义，会把周期计时器从零重算；
+            // 而 apply() 是每次冷启动（ReadItApp.onCreate）都调 —— 于是
+            // 用户每天开一次应用，24h 计时器就永远被清零，**一次都不会触发**，
+            // 恰好打中产品承诺的「API 23-25 后台静默每 24 小时」这一档。
+            //
+            // 幂等的是「任务存在」，不是「计时器」。这里改为：查不到时用一个
+            // 进程内标记 + 「本次进程是否已 schedule 过」来判断，避免冷启动重排。
+            SyncCapability.jobScheduledInProcess
         }
 
         if (!wanted) {
@@ -58,6 +65,9 @@ object SyncScheduler {
                 scheduler.cancel(SyncCapability.JOB_ID)
                 ReadItLog.i("sync schedule: cancelled (enabled=${prefs.syncAutoEnabled} configured=${prefs.webDavConfigured} api=$api)")
             }
+            // 无论 existing 与否都要复位：API 21-23 靠这个标记判断，
+            // 复位后用户重新打开自动同步时才会真的重排一次
+            SyncCapability.jobScheduledInProcess = false
             return
         }
         if (existing) {
@@ -94,6 +104,8 @@ object SyncScheduler {
         }
 
         val code = runCatching { scheduler.schedule(builder.build()) }
+        // 标记本次进程已 schedule：API 21-23 查不到 allPendingJobs，靠它避免冷启动反复重排
+        SyncCapability.jobScheduledInProcess = true
         ReadItLog.i(
             "sync schedule: api=$api every ${hours}h mode=${SyncCapability.modeOf(api)} -> " +
                 (code.getOrNull()?.toString() ?: "failed: ${code.exceptionOrNull()?.message}")

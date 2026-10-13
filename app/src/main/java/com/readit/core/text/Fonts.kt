@@ -105,4 +105,29 @@ object Fonts {
         if (value.isNaN()) DEFAULT_SIZE_SP else value.coerceIn(MIN_FONT_SP, MAX_FONT_SP)
 
     const val DEFAULT_SIZE_SP = 14f
+
+    // ---------------------------------------------------------------- 行距 / 边距
+
+    /**
+     * 行距范围。取值与阅读页两个滑条一致：行距滑条 0..10 映射到 1.0..2.0。
+     *
+     * 上下限都要 clamp 的原因和字号相同，但后果更隐蔽：
+     *  - `<= 0`：`TxtCanvasView.onDraw` 的 `lineHeight` 变 0，所有行叠在同一基线上；
+     *  - `NaN`：`y += NaN` 让 `y > bottomLimit` 恒为假且 `drawText` 落在非法坐标 → 整页空白。
+     * 用户能拖出来的只有合法值，但配置备份 / 跨设备恢复 / 系统 prefs 还原都能带进越界值，
+     * 所以读取侧也必须兜住（原来只有字号有这层保护，三个排版参数的处理不对称）。
+     */
+    const val MIN_LINE_SPACING = 1.0f
+    const val MAX_LINE_SPACING = 2.0f
+    const val DEFAULT_LINE_SPACING = 1.3f
+
+    fun clampLineSpacing(value: Float): Float =
+        if (value.isNaN()) DEFAULT_LINE_SPACING else value.coerceIn(MIN_LINE_SPACING, MAX_LINE_SPACING)
+
+    /** 边距范围，与阅读页边距滑条 0..24dp 一致 */
+    const val MIN_MARGIN_DP = 0
+    const val MAX_MARGIN_DP = 24
+    const val DEFAULT_MARGIN_DP = 12
+
+    fun clampMarginDp(value: Int): Int = value.coerceIn(MIN_MARGIN_DP, MAX_MARGIN_DP)
 }

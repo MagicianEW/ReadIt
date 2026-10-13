@@ -32,13 +32,13 @@ enum class CapabilityTier(val id: Int, val label: String) {
 /**
  * 由档位派生的内存/渲染策略。
  *
- * ## 各字段的实际生效情况（2026-09 全面测试核对）
+ * ## 各字段的实际生效情况（2026-09 全面测试核对，2026-10 复核更正）
  *
  * | 字段 | 是否驱动行为 | 说明 |
  * |---|---|---|
- * | [pdfCachedPages] | ✅ | `PdfRenderView.cachePages` |
  * | [docxMode] | ✅ | `DocxConverter.convert(mode)` |
  * | [lowMemory] | ✅ | `PdfTextExtractor(tempFileOnly=…)` |
+ * | [pdfCachedPages] | ❌ | **无消费方**。`PdfRenderView` 恒为单页常驻（§5.1 硬约束），本值仅作档位参考与调试显示。`PdfRenderView.cachePages` 曾被文档标成 ✅ 并由 `ReaderActivity` 赋值，实际无人读取，现已删除以免再次漂移 |
  * | [txtPageChars] | ❌ | TXT 分页由几何标定（[com.readit.reader.txt.TxtLayout]）决定，本值仅作档位参考 |
  * | [epubPreloadChapters] | ❌ | 当前一律不预加载（比 LOW 档要求更保守） |
  * | [preloadEnabled] | ❌ | 同上 |
@@ -55,7 +55,12 @@ data class RenderStrategy(
     val txtPageChars: Int,
     /** EPUB 前后预加载章节数 */
     val epubPreloadChapters: Int,
-    /** PDF 位图缓存页数 */
+    /**
+     * PDF 位图缓存页数。
+     *
+     * **当前无消费方**：`PdfRenderView` 恒为单页常驻，这是 §5.1「PDF 单页位图」的硬要求，
+     * 不是遗漏。留这个字段只是保留档位口径的完整性与调试显示，不要当成「渲染侧会按它预取」。
+     */
     val pdfCachedPages: Int,
     /** DOCX 渲染模式 */
     val docxMode: DocxMode,

@@ -27,12 +27,16 @@ package com.readit.data.backup
  * **只有当目标设备「从未显式设置过」该项时，才接受备份里的值。**
  * 本机一旦显式设过，一律保留本机现值 —— 用户在本机做出的设备级决策，优先级高于配置文件。
  *
- * ## 「显式设置过」的判据 = SharedPreferences 里**存在这个键**
+ * ## 「显式设置过」的判据 = 一个**独立标记键**（`user_set_*`），不是值键是否存在
  *
  * 刻意**不用**「值 != AUTO」来判定：用户在设置页主动选「自动」同样是一次显式决策
  * （意思是「让这台机器自己决定」），不该被判成「没设过」而被备份里的具体档位顶掉。
- * 本项目只有三处会写 `perfTier`：引导页、设置页、配置恢复本身 —— 都是用户动作，
- * 所以「键存在」是个干净可靠的信号，不会因为代码里某处无脑回写默认值而误判。
+ *
+ * 同样**不能**用 `sp.contains(值键)`：本项目写 `perfTier` 的三处里有「配置恢复本身」，
+ * 而恢复若走普通 setter 就等于自己把「显式设置过」点亮 —— 于是**恢复一次就把守卫烧掉**，
+ * 第二次起从任何设备导入设备属性全被拒。上面那段 Civi2 的实测事故被推迟到第二次发生，
+ * 症状一样、根因更隐蔽。故判据与被判据的值键分离：见 `ReadItPrefs.hasExplicitPerfTier`
+ * 与 `setPerfTierFromRestore`。
  *
  * 纯函数、无 Android 依赖，便于 JVM 单测覆盖。
  */
@@ -57,7 +61,7 @@ object DeviceScopedConfig {
     /**
      * 是否应保留本机现值（即忽略备份里该字段）。
      *
-     * @param localExplicitlySet 本机是否已显式设置过该项（键存在于 SharedPreferences）
+     * @param localExplicitlySet 本机是否已显式设置过该项（独立的 `user_set_*` 标记键为 true）
      * @return true = 保留本机值；false = 可以接受备份里的值
      */
     fun keepLocal(key: String, localExplicitlySet: Boolean): Boolean =

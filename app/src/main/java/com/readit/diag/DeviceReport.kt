@@ -170,14 +170,15 @@ object DeviceReport {
     fun toProfileJson(r: DeviceReportData, notes: String = ""): String {
         val db = DeviceProfileDb(
             app = "ReadIt",
-            version = 2,
+            version = 3,
             devices = listOf(
                 DeviceProfile(
                     brand = r.brand.ifBlank { "unknown" },
                     model = r.model.ifBlank { "unknown" },
                     device = r.device.ifBlank { "unknown" },
                     socClass = SocClass.from(r.socClass).key,
-                    ramClass = com.readit.core.eal.RamClass.from(r.ramClass).key,
+                    // 不再写 ramClass：RAM 档一律来自实测，导出的画像里写死一个值
+                    // 只会让拿到文件的人以为它参与判定（实测值放在同文件的其它字段里）。
                     resolution = r.resolution,
                     refreshMode = com.readit.core.eal.RefreshMode.from(r.refreshMode).key,
                     inputKeys = KeyProbe.logicalInputKeys(r.keySamples),

@@ -35,9 +35,16 @@
         android:xlargeScreens="true"
         android:anyDensity="true" />
 
+    <!--
+        android:allowBackup="false"（见 application 处）：
+        WebDAV 密码以明文存在 readit_prefs 里是「面向侧载封闭设备」的有意取舍，
+        但 allowBackup=true 会让整个 SharedPreferences 随 Android 自动备份离开设备、
+        上到用户的 Google 账号 —— 取舍的前提（封闭设备）与实际配置自相矛盾。
+        用户自己的数据另有两条正规出口：应用内「导出配置」与「云端版本化备份」。
+    -->
     <application
         android:name="com.readit.eink.ReadItApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"

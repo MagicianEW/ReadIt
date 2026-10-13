@@ -107,4 +107,56 @@ class ChapterDetectorTest {
         val chapters = ChapterDetector.detect(text)
         assertFalse("过密章节应判定为不可靠", ChapterDetector.isReliable(chapters, text.length))
     }
+
+    // ------------------------------------------------------------ 上限截断（必须对用户可见）
+
+    @Test
+    fun `truncation flag is set when more headings remain past the cap`() {
+        val sb = StringBuilder()
+        repeat(30) { i ->
+            sb.append("第").append(i + 1).append("章 标题\n")
+            sb.append("正文".repeat(20)).append("\n")
+        }
+        val r = ChapterDetector.detectDetailed(sb.toString(), maxChapters = 10)
+        assertEquals("必须按上限停", 10, r.chapters.size)
+        assertTrue("后面还有内容，必须标记为被截断", r.truncated)
+    }
+
+    @Test
+    fun `truncation flag stays false when the cap hit heading is the very last line`() {
+        // 唯一能证明「没有下文」的情形：触发上限的那一行就是全文最后一行。
+        val text = (1 until 5).joinToString("\n") { "第${it + 1}章 标题\n正文正文正文" } +
+            "\n第5章 标题"
+        val r = ChapterDetector.detectDetailed(text, maxChapters = 5)
+        assertEquals(5, r.chapters.size)
+        assertFalse("上限正好落在全文末尾，不算被截断", r.truncated)
+    }
+
+    @Test
+    fun `truncation flag is set when the cap hit heading still has body text after it`() {
+        // 反过来这一条才是常态：第 2000 个标题后面还有正文（哪怕后面再没有标题），
+        // 用户看到的目录就是残缺的，必须提示。
+        val sb = StringBuilder()
+        repeat(5) { i ->
+            sb.append("第").append(i + 1).append("章 标题\n")
+            sb.append("正文".repeat(20)).append("\n")
+        }
+        val r = ChapterDetector.detectDetailed(sb.toString(), maxChapters = 5)
+        assertEquals(5, r.chapters.size)
+        assertTrue("后面还有正文就必须提示", r.truncated)
+    }
+
+    @Test
+    fun `truncation flag stays false for short texts`() {
+        val r = ChapterDetector.detectDetailed("第1章 标题\n正文\n", maxChapters = 2000)
+        assertFalse(r.truncated)
+        assertEquals(1, r.chapters.size)
+    }
+
+    @Test
+    fun `detect keeps returning the bare chapter list`() {
+        val text = "第1章 甲\n正文\n第2章 乙\n正文\n"
+        assertEquals(2, ChapterDetector.detect(text).size)
+        assertEquals(ChapterDetector.detect(text), ChapterDetector.detectDetailed(text).chapters)
+    }
 }

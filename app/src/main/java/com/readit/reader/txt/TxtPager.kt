@@ -144,17 +144,20 @@ class TxtPager(
 
         // 1) 优先在段落边界断开（容量 60% 之后的第一个换行）
         val minBreak = from + (capacity * 0.6).toInt()
-        val nl = text.lastIndexOf('\n', end)
-        if (nl >= minBreak && nl < end) return nl + 1
+        // lastIndexOf 的搜索范围是**含** startIndex 的，所以要从 end-1 起搜：
+        // 下标 end 那一格已经属于下一页，让上一页吃掉它就越过了容量。
+        // 原实现搜到 end 再用 `nl < end` 兜底，表面等价，实际后果是「换行恰好落在 end 上」
+        // 这种最自然的断点被白白跳掉，掉进第 2 步的句读/空格断点，最坏浪费 40% 版面。
+        val nl = text.lastIndexOf('\n', end - 1)
+        if (nl >= minBreak) return nl + 1
 
-        // 2) 退而求其次：断在句读/空格处
-        for (i in end downTo minBreak) {
-            val c = text[i]
-            if (c == '　' || c == ' ' || c == '。' || c == '！' || c == '？' ||
-                c == '，' || c == '；' || c == '.' || c == ',' || c == ' '
-            ) {
-                return i + 1
-            }
+        // 2) 退而求其次：断在句读 / 空白处
+        //    搜索范围是 [minBreak, end-1] 而不是含 end：text[end] 已经属于下一页，
+        //    在它上面断开会让本页比标称 capacity 多吃一个字符。原实现从 i = end 起扫，
+        //    于是「断点恰好落在 end 上」时每页都溢出 1 —— capacity 是估算总页数的分母，
+        //    溢出会让估算与精确值之间多出一层系统性偏差。
+        for (i in end - 1 downTo minBreak) {
+            if (isBreakChar(text[i])) return i + 1
         }
 
         // 3) 超长无断点的行：硬切（避免死循环）
@@ -167,5 +170,25 @@ class TxtPager(
 
         /** 全量分页的硬上限，防畸形输入（如超大单行）把主线程拖死 */
         private const val MAX_PAGE_GUARD = 1_000_000
+
+        /**
+         * 断行字符表 —— 全项目**唯一**一份清单。
+         *
+         * 原先是内联在 `nextBoundary` 的 if 条件里的一串字面量，其中半角空格 `' '`
+         * 写了两次：第二次本来应该是制表符 `'\t'`，于是缩进排版的 txt 永远不在 Tab 处断行。
+         * 两处 `' '` 并排时肉眼几乎看不出是重复还是笔误，抽成具名集合后这个问题不会再复发。
+         */
+        private val BREAK_CHARS: Set<Char> = buildSet {
+            // 中西文句读
+            "。！？；，、：.!?;,:".forEach { add(it) }
+            // 全角空格 / 半角空格 / 制表符
+            add('　')
+            add(' ')
+            add('\t')
+            // 收尾括号与引号：整块不拆
+            "）]}」』".forEach { add(it) }
+        }
+
+        private fun isBreakChar(c: Char): Boolean = c in BREAK_CHARS
     }
 }

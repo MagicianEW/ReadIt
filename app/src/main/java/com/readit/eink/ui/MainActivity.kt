@@ -44,7 +44,7 @@ class MainActivity : AppCompatActivity() {
             append("[渲染策略]\n")
             append("TXT 分页: ${strategy.txtPageChars} 字符\n")
             append("EPUB 预加载: ${strategy.epubPreloadChapters} 章\n")
-            append("PDF 位图缓存: ${strategy.pdfCachedPages} 页\n")
+            append("PDF 位图缓存: 1 页（恒定，档位参考值 ${strategy.pdfCachedPages}）\n")
             append("DOCX 模式: ${strategy.docxMode}\n")
             append("预加载: ${if (strategy.preloadEnabled) "开" else "关"}\n\n")
             append("[存储]\n")

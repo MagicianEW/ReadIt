@@ -446,13 +446,18 @@ class SettingsActivity : AppCompatActivity() {
             findPreference<EditTextPreference>("webdav_url")?.let {
                 it.text = prefs.webDavUrl
                 it.setOnPreferenceChangeListener { pref, v ->
-                    val normalized = DavUrl.normalizeInput(v as? String ?: "")
+                    val raw = v as? String ?: ""
+                    val normalized = DavUrl.normalizeInput(raw)
                     prefs.webDavUrl = normalized
-                    // 回填规范化结果（补全 scheme / 去尾斜杠），否则用户下次打开还看到原样输入。
+                    // 回填规范化结果（补全 scheme / 去尾斜杠 / 剥 userinfo），否则用户下次打开还看到原样输入。
                     // 返回 false 是刻意的：框架若返回 true 会把「原始值」再写一遍，覆盖掉回填。
                     (pref as? EditTextPreference)?.text = normalized
                     when {
                         normalized.isEmpty() -> Unit
+                        // 地址里内嵌的 user:pass 会被剥掉 —— 否则它会跟着每一条请求 URL
+                        // 出现在异常消息里，密码直接进 logcat。凭据请填在下面两项。
+                        DavUrl.hasUserInfo(raw) ->
+                            toast(getString(R.string.sync_userinfo_stripped))
                         DavUrl.isCleartext(normalized) ->
                             toast(getString(R.string.sync_cleartext_warning))
                         else -> Unit
@@ -471,6 +476,15 @@ class SettingsActivity : AppCompatActivity() {
             }
             findPreference<EditTextPreference>("webdav_password")?.let {
                 it.text = prefs.webDavPassword
+                // 密码掩码：不在 XML 里写 android:inputType（本文件根节点只声明了 app 命名空间，
+                // 写了会 AAPT 报 attribute not found，同 SeekBarPreference 的 max）。
+                // 不加掩码的话设置页直接明文显示 NAS 密码，肩窥/截图即泄露。
+                it.setOnBindEditTextListener { editText ->
+                    editText.inputType =
+                        android.text.InputType.TYPE_CLASS_TEXT or
+                            android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+                    editText.setSelection(editText.text?.length ?: 0)
+                }
                 it.setOnPreferenceChangeListener { _, v -> prefs.webDavPassword = v as? String ?: ""; true }
             }
             findPreference<EditTextPreference>("webdav_dir")?.let {
@@ -731,19 +745,57 @@ class SettingsActivity : AppCompatActivity() {
             }
         }
 
-        /** 导入后把控件显示值对齐到配置（`setValue` 不会触发 OnPreferenceChangeListener） */
+        /**
+         * 导入/恢复后把控件显示值对齐到配置（`setValue` 不会触发 OnPreferenceChangeListener）。
+         *
+         * 原来只同步了 8 个控件，漏掉的恰好是 ConfigBackup 真正会写的那几个：
+         * fontSizeSp / renderMode / fontFamily / lightOn / lightLevel / syncAuto /
+         * webDavPassword。结果是「恢复后排版、渲染模式、屏幕灯在设置页显示的还是旧值」，
+         * 而实际生效的又是新值 —— 用户看到的与生效的不一致。
+         * 与其手工维护这张容易漏的清单，不如**遍历全部 preference**：
+         * `persistString` 之后没有回调的控件在这里统一 `syncSharedPreferences`。
+         */
         private fun syncControlsFromPrefs(prefs: ReadItPrefs) {
             findPreference<ListPreference>("perf_tier")?.value = prefs.perfTier.key
             findPreference<ListPreference>("refresh_mode")?.value = prefs.refreshMode.key
+            findPreference<ListPreference>("render_mode")?.let { p ->
+                p.value = prefs.renderMode.key
+                // summary 是动态算出来的（自动→当前实际生效值），要重算
+                p.summary = renderModeLabel(
+                    prefs.renderMode,
+                    ScreenProfileDetector.detect(requireContext(), prefs.renderMode).renderMode
+                )
+            }
+            findPreference<SeekBarPreference>("font_size")?.let { p ->
+                p.value = prefs.fontSizeSp.toInt()
+                p.summary = getString(R.string.pref_font_size_summary, p.value)
+            }
+            findPreference<SeekBarPreference>("light_level")?.let { p ->
+                p.value = prefs.lightLevel
+            }
             findPreference<SwitchPreferenceCompat>("pdf_crop")?.isChecked = prefs.pdfCropEnabled
             findPreference<SwitchPreferenceCompat>("invert")?.isChecked = prefs.invertEnabled
-            findPreference<EditTextPreference>("scan_sample_pages")?.text =
-                prefs.scanSamplePages.toString()
-            findPreference<EditTextPreference>("scan_min_chars")?.text =
-                prefs.scanMinCharsPerPage.toString()
+            findPreference<SwitchPreferenceCompat>("light_on")?.let { p ->
+                p.isVisible = ScreenLight.canToggle(requireContext())
+                p.isChecked = prefs.lightOn
+            }
+            findPreference<SwitchPreferenceCompat>("sync_auto")?.isChecked = prefs.syncAutoEnabled
+            findPreference<EditTextPreference>("scan_sample_pages")?.text = prefs.scanSamplePages.toString()
+            findPreference<EditTextPreference>("scan_min_chars")?.text = prefs.scanMinCharsPerPage.toString()
             findPreference<EditTextPreference>("webdav_url")?.text = prefs.webDavUrl
             findPreference<EditTextPreference>("webdav_user")?.text = prefs.webDavUser
+            findPreference<EditTextPreference>("webdav_password")?.text = prefs.webDavPassword
             findPreference<EditTextPreference>("webdav_dir")?.text = prefs.webDavDir
+            // 字体下拉的条目是动态拼的（用户字体随时可增删），值变了要重建列表
+            findPreference<ListPreference>("font_family")?.let { p ->
+                val userFonts = UserFonts.scan(requireContext())
+                val ids = Fonts.builtinIds() + userFonts.map { it.id }
+                val labels = resources.getStringArray(R.array.font_builtin_labels).toMutableList()
+                userFonts.forEach { labels.add(getString(R.string.font_user_label, it.displayName())) }
+                p.entries = labels.toTypedArray()
+                p.entryValues = ids.toTypedArray()
+                p.value = UserFonts.currentId(requireContext())
+            }
             findPreference<Preference>("books_dir")?.summary = booksDirLabel(prefs)
         }
 
@@ -835,14 +887,5 @@ class SettingsActivity : AppCompatActivity() {
             io.shutdownNow()
             super.onDestroy()
         }
-    }
-
-    companion object {
-        /** 供按键学习向导复用：写入一条映射 */
-        fun persistKey(prefs: ReadItPrefs, keyCode: Int, actionKey: String) {
-            prefs.putKeyMap(keyCode, actionKey)
-        }
-
-        fun actionLabelOf(key: String?): String = InputMapper.Action.from(key).name
     }
 }

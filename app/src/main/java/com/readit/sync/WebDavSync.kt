@@ -109,6 +109,13 @@ class WebDavSync(
                     }
                     else -> failed.add(name to "unexpected action ${decision.action}")
                 }
+            } catch (e: WebDavClient.ConflictException) {
+                // 条件写失败（If-Match / If-Unmodified-Since / If-None-Match 命中 412）= 远端
+                // 在我们判定之后被别人改过。这是**冲突**，不是「同步失败」：
+                // 原实现让通用 catch 接住，记成 failed，用户看到的摘要会把
+                // 「远端被人改了、需要人工决定」误读成「网络/服务端故障，重试即可」。
+                ReadItLog.w("sync conditional write conflicted on $name: ${e.message}")
+                conflicts.add(name)
             } catch (e: Exception) {
                 ReadItLog.w("sync file failed: $name -> ${e.message}")
                 failed.add(name to (e.message ?: "error"))
@@ -149,7 +156,14 @@ class WebDavSync(
     }
 
     private fun uploadLocal(context: Context, name: String, local: File, record: SyncRecord?) {
-        val result = client.upload(name, local, record?.etag)
+        // 把基线里的 Last-Modified 一并传下去：服务端不给 ETag 时，
+        // 写入层靠 If-Unmodified-Since 维持「远端没被改过才覆盖」的条件语义。
+        val result = client.upload(
+            name = name,
+            file = local,
+            remoteEtag = record?.etag,
+            remoteLastModified = record?.lastModified
+        )
         persist(context, name, local, client.urlOf(name), result.etag, result.lastModified, local.length())
     }
 

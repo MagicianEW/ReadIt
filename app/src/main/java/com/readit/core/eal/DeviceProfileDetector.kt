@@ -54,6 +54,9 @@ object DeviceProfileDetector {
             ?: matched?.refresh
             ?: RefreshMode.from(db.fallbackRules.defaultRefreshMode)
 
+        // RAM 档**只**来自实测（ActivityManager + /proc/meminfo 交叉验证）。
+        // 设备库曾有一个 ramClass 字段，但它从未被读取：表里写死 1GB 的设备只要
+        // 刷了固件扩内存就与实测矛盾。写死不如实测，所以那个字段已经删掉。
         val resolution = currentResolution(context)
 
         val manualTier = prefs.perfTier
@@ -61,7 +64,9 @@ object DeviceProfileDetector {
 
         ReadItLog.i(
             "EAL detect: model=${Build.MODEL} known=${matched != null} " +
-                "soc=$finalSoc ram=$finalRam(${totalRamMb}MB) res=$resolution refresh=$refresh manual=$manual"
+                "profile=${matched?.let { "${it.brand}/${it.model}" } ?: "-"} " +
+                "soc=$finalSoc ram=$finalRam(${totalRamMb}MB, measured) " +
+                "res=$resolution refresh=$refresh manual=$manual"
         )
         return Result(matched, finalSoc, finalRam, totalRamMb, resolution, refresh, manual)
     }
@@ -79,18 +84,57 @@ object DeviceProfileDetector {
 
     // ---------------- device match ----------------
 
-    private fun matchDevice(db: DeviceProfileDb): DeviceProfile? {
-        val brand = Build.BRAND.orEmpty().uppercase(Locale.US)
-        val model = Build.MODEL.orEmpty().uppercase(Locale.US)
-        val device = Build.DEVICE.orEmpty().uppercase(Locale.US)
-        return db.devices.firstOrNull { p ->
-            val pb = p.brand.uppercase(Locale.US)
-            val pm = p.model.uppercase(Locale.US)
-            val pd = p.device.uppercase(Locale.US)
-            (pm.isNotEmpty() && pm == model) ||
-                (pb.isNotEmpty() && pb == brand && pd.isNotEmpty() && pd == device)
-        }
+    private fun matchDevice(db: DeviceProfileDb): DeviceProfile? = findMatch(
+        db,
+        Build.BRAND.orEmpty(),
+        Build.MODEL.orEmpty(),
+        Build.DEVICE.orEmpty()
+    )
+
+    /**
+     * 设备库匹配（纯逻辑，可 JVM 测）。
+     *
+     * [DeviceProfile.model] 支持两种写法：
+     *  - 精确：`"KY-01L"` —— 与 `Build.MODEL` 全等比较
+     *  - 前缀通配：`"BOOX*"` —— `Build.MODEL` 以该前缀开头即可
+     *
+     * 加通配是必要的，不是锦上添花：`Build.MODEL` 是**厂商自己填的字符串**，同一产品线
+     * 会随固件变（Onyx 常见 `BOOX` / `Nova` / `Likee`…）。原实现只支持全等，于是资产里
+     * 写 `model:"BOOX"` 的那条 Onyx 记录只能碰巧命中一台机器，其余全部落到 fallback，
+     * 而作者看库文件会以为「Onyx 已经适配过了」。
+     */
+    internal fun findMatch(
+        db: DeviceProfileDb,
+        brand: String,
+        model: String,
+        device: String
+    ): DeviceProfile? {
+        val b = brand.trim().uppercase(Locale.US)
+        val m = model.trim().uppercase(Locale.US)
+        val d = device.trim().uppercase(Locale.US)
+        return db.devices.firstOrNull { matches(it, b, m, d) }
     }
+
+    /** 单条画像的匹配判定（[findMatch] 的判定内核） */
+    internal fun matches(p: DeviceProfile, brand: String, model: String, device: String): Boolean {
+        val pb = p.brand.trim().uppercase(Locale.US)
+        val pm = p.model.trim().uppercase(Locale.US)
+        val pd = p.device.trim().uppercase(Locale.US)
+        if (pm.endsWith(WILDCARD)) {
+            val prefix = pm.dropLast(WILDCARD.length)
+            // 前缀通配只放宽 model，**不放宽 brand**：brand 声明了就必须对上，
+            // 否则一台别的厂商机器只要 model 撞上就会被误认成已适配机型。
+            if (prefix.isNotEmpty() && model.startsWith(prefix) &&
+                (pb.isEmpty() || pb == brand)
+            ) {
+                return true
+            }
+        }
+        return (pm.isNotEmpty() && pm == model) ||
+            (pb.isNotEmpty() && pb == brand && pd.isNotEmpty() && pd == device)
+    }
+
+    private const val WILDCARD = "*"
 
     // ---------------- SoC ----------------
 
@@ -122,13 +166,17 @@ object DeviceProfileDetector {
         val s = raw.lowercase(Locale.US).replace(" ", "")
         if (s.isEmpty()) return null
 
-        // 标准档：A53 及以上 / ARMv8 / 64 位
+        // 判定顺序：**先判具体型号，再判泛化平台前缀**。
+        // 反过来会踩一个很隐蔽的坑：原实现先判 high，而 low 里的 `mt8127` 恰好包含
+        // high 里的 `mt81` 子串，于是「明确列在低档」的 mt8127 永远先被 high 命中、
+        // 被判成 A53 高档，低端机拿到高档策略（注释说的「避免混合串误判」在此处正好误判）。
+        // 现按「从长到短」逐个判，且同一档内先匹配更长的关键字。
         val high = listOf(
             "cortex-a53", "cortex-a55", "cortex-a57", "cortex-a72", "cortex-a73",
             "cortex-a75", "cortex-a76", "cortex-a77", "cortex-a78", "cortex-x1",
             "armv8", "aarch64", "arm64", "msm8937", "msm8940", "msm8953",
             "sdm", "snapdragon4", "snapdragon6", "snapdragon7", "snapdragon8",
-            "rk3368", "rk3399", "rk3566", "rk3568", "mt67", "mt81", "exynos"
+            "rk3368", "rk3399", "rk3566", "rk3568", "mt6737", "mt67", "mt81", "exynos"
         )
         // 兜底档：A7 级
         val low = listOf(
@@ -137,9 +185,11 @@ object DeviceProfileDetector {
             "mt8127", "mt6580", "allwinner"
         )
 
-        // 先判高后判低，避免 "cortex-a53 armv7" 之类混合串误判
-        if (high.any { s.contains(it) }) return SocClass.A53_CLASS_OR_ABOVE
-        if (low.any { s.contains(it) }) return SocClass.A33_CLASS
+        for (kw in (low + high).sortedByDescending { it.length }) {
+            if (s.contains(kw)) {
+                return if (kw in low) SocClass.A33_CLASS else SocClass.A53_CLASS_OR_ABOVE
+            }
+        }
         return null
     }
 

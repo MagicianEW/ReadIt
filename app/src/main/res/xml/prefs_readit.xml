@@ -119,6 +119,9 @@
             app:key="webdav_user"
             app:title="@string/pref_webdav_user" />
 
+        <!-- 密码掩码走代码设置（见 SettingsActivity.bindSync）：
+             inputType 是 android 命名空间的属性，而本文件根节点只声明了 app 命名空间，
+             写在这里会 AAPT 报 attribute not found（与 SeekBarPreference 的 max 同因） -->
         <EditTextPreference
             app:key="webdav_password"
             app:title="@string/pref_webdav_password" />

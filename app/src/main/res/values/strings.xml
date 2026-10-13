@@ -103,6 +103,7 @@
     <string name="epub_no_toc">未能解析目录，已按章节顺序阅读</string>
     <string name="format_unsupported">暂不支持的格式：%1$s</string>
     <string name="toc_empty">没有可用目录</string>
+    <string name="toc_truncated">目录过多，只收录了前 %1$d 章；可用翻页继续阅读</string>
 
     <!-- PDF -->
     <string name="pdf_opening">正在打开 PDF…</string>
@@ -112,6 +113,8 @@
     <string name="pdf_page_timeout">第 %1$d 页渲染超时，可尝试翻页或返回重开</string>
     <string name="pdf_timeout_fallback">PDF 渲染持续超时（本机性能不足），已切换为文本模式</string>
     <string name="pdf_no_text">该 PDF 没有可提取的文本层</string>
+    <!-- 扫描版 PDF 的降级出口：没有文本层时留在渲染档，而不是把用户弹出去 -->
+    <string name="pdf_no_text_keep_render">扫描版 PDF 没有文本层，已保留原版渲染（部分页面可能较慢）</string>
     <string name="pdf_encrypted_title">加密 PDF 暂不支持</string>
     <string name="pdf_encrypted_message">该文件已加密（需要打开密码），本应用暂不支持解析。\n\nPdfium 渲染与 PdfBox 文本提取都需要密码才能读取，因此不会尝试降级为文本模式。</string>
     <string name="pdf_scanned_title">疑似扫描版 PDF</string>
@@ -139,6 +142,7 @@
     <string name="sync_failed">同步失败：%1$s</string>
     <string name="sync_reset_done">已清空同步基线，下次同步将重新比对</string>
     <string name="sync_cleartext_warning">已使用明文 HTTP：账号与书籍内容将以明文传输，建议改用 https 或仅在可信局域网内使用</string>
+    <string name="sync_userinfo_stripped">已从服务器地址中移除内嵌的账号密码，请填在下面「用户名」「密码」两项里</string>
 
     <!-- Key learning -->
     <string name="key_learn_prompt">选择要绑定的动作，然后按下实体按键</string>

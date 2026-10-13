@@ -2,7 +2,7 @@
 
 面向墨水屏（E-Ink）Android 设备的本地阅读器。纯黑白、无动效，性能与刷新策略交给设备档位决定。
 
-当前版本：**v0.1.5**（`versionCode 5` / `applicationId com.readit.eink` / minSdk 19 / targetSdk 34）。
+当前版本：**v0.1.6**（`versionCode 6` / `applicationId com.readit.eink` / minSdk 19 / targetSdk 34）。
 
 ## 特性
 
@@ -12,24 +12,28 @@
 - TXT 编码自动检测（UTF-8 / GBK 等），判为乱码可手动指定，并按书记住选择
 - **反色**（黑白对调）：排版面板与工具栏一并反色，视觉一致
 - 字号 10–20sp **四种格式全生效**：TXT / EPUB / DOCX / PDF 文本路径直改；DOCX 原版渲染走 WebView textZoom；EPUB 对书内绝对 px 字号做规格化注入；PDF 原版渲染为固定版式，面板自动禁用并提示。行距、页边距、字体可选（4 个系统族 + 2 个打包开源字体：思源宋体、霞鹜文楷，OFL 1.1），离线可用
-- CJK 行高按 hhea 的 `descent - ascent` 计算，不被 OS/2 的 `top/bottom` 撑高
-- 章节目录、目录跳转、阅读进度记忆
+- CJK 行高按 hhea 的 `descent - ascent` 计算，不被 OS/2 的 `top/bottom` 撑高；分页与绘制共用同一口径，用户字体行距拉满时也不会出现「页尾字符既不在本页也不在任何后续页」的静默丢字
+- **EPUB 安全渲染**：关闭 WebView 的 `allowUniversalAccessFromFileURLs`，禁用网络加载与网络图片，并对 `shouldInterceptRequest` 做白名单拦截——恶意 EPUB 无法借 WebView 读取本机全盘或外传数据
+- **DOCX 降级路径如实告警**：嵌套表格、页眉 / 脚注 / 尾注 / 批注等未完整转换的部件会提示，不再让降级结果显得比实际完整；转换进程超时不再把任务退回主进程（那等于把 OOM 搬回阅读器自身）
+- 章节目录、目录跳转、阅读进度记忆；章节过多（超过 2000 章）时会明确提示目录已截断，而不是让后半本书无从寻达
 
 ### 墨水屏适配
 
 - **屏幕灯**：开关 + 等级（0–100，步进 5）；左下角热区长按开合、竖划调亮度，带防误触。无厂商 EPD SDK 时自动退回系统窗口亮度
 - **刷新模式** `AUTO / QUALITY / FAST / REGAL / SYSTEM`：按设备自动探测，可手动覆盖
-- **性能档位** `AUTO / FALLBACK / STANDARD / ENHANCED`：按 SoC / RAM / 分辨率 / 设备库画像分级，未知机型保守回落
+- **性能档位** `AUTO / FALLBACK / STANDARD / ENHANCED`：按 SoC / RAM / 分辨率 / 设备库画像分级，未知机型保守回落。切档即时生效，无需重启应用；RAM 档只采信实测值（ActivityManager 与 `/proc/meminfo` 交叉验证），不取设备库里的标称值
 - **分辨率适配与点对点渲染**：首启检测分辨率与密度，按物理 dpi 分三档布局（sw400 / sw600）；设置页可切渲染模式（自动 / 平滑 / 锐利），锐利模式关闭抗锯齿并整像素吸附字体与边距，墨水屏 1-bit 面板上文字边缘不再发虚
+- **拖动排版滑条不卡**：拖动字号 / 行距 / 边距过程中页数走估算值显示，松手后再补精确值，不会每一格都对全书做一次完整分页
 - 配色纯黑白，禁用动画与过渡
 
 ### 数据与同步
 
 - **阅读统计**：累计时长、打开次数、翻页数、单书排行
 - **书签**：按字符偏移存储，**跨设备合并取并集**（不互相覆盖）
-- **WebDAV 同步**：进度 / 书签双向同步，ETag 基线判变；冲突保守处理——无基线记录时判冲突且不写入，不静默覆盖
-- **云端版本化备份**：配置 / 统计 / 进度 / 书签打包成带时间戳的 zip，可列出版本并选择恢复
+- **WebDAV 同步**：进度 / 书签双向同步，ETag 基线判变；冲突保守处理——无基线记录时判冲突且不写入，不静默覆盖。远端侧车损坏时用本地那份修复，并把损坏条目计入同步报告，不会悄悄盖掉远端数据
+- **云端版本化备份**：配置 / 统计 / 进度 / 书签打包成带时间戳的 zip，可列出版本并选择恢复；备份文件名撞名不再覆盖历史版本
 - **设备属性与账号属性分开处理**：性能档位、刷新模式属于*设备*属性，跨设备恢复配置时**只在目标设备从未显式设置过时才写入**，避免把源设备的档位盖到目标机上造成无声降级
+- **服务器地址里的内嵌账号密码会被剥离**：`http://user:pass@nas` 形式的地址会自动去掉凭据并提示改填到「用户名 / 密码」两项——凭据写在 URL 里会随网络错误消息进入系统日志
 
 ### 其他
 
@@ -39,17 +43,34 @@
 
 ## 构建
 
-需要 **JDK 17** 与 Android SDK（compileSdk 34）。
+需要 **JDK 17** 与 Android SDK（compileSdk 34 / build-tools 34.0.0）。
+
+**首次克隆后必做一步**：写 `local.properties`（该文件被 `.gitignore` 排除，不入库）：
+
+```properties
+sdk.dir=/Users/<你的用户名>/Library/Android/sdk
+```
+
+然后确保 `JAVA_HOME` 指向 JDK 17（macOS 上 Homebrew 装的是 `/opt/homebrew/opt/openjdk@17`）：
 
 ```bash
+export JAVA_HOME=$(/usr/libexec/java_home -v 17)   # 或手动指定
 ./gradlew assembleDebug      # debug 包，用工程自带 debug.keystore 签名
 ./gradlew assembleRelease    # release 包，未签名（输出 *-release-unsigned.apk）
 ./gradlew testDebugUnitTest  # 单元测试
 ```
 
+> 仓库里的 `gradlew` 已带可执行位。若你手工改过权限导致 `./gradlew: Permission denied`，
+> 补一句 `chmod +x gradlew` 即可。
+
 - ABI 分包只出 `armeabi-v7a` 与 `arm64-v8a`（不出 universal 包），每 ABI 分包体积红线 16MB。
 - 工程自带 `app/debug.keystore`：debug 构建统一用它签名，不同机器打出的包可互相覆盖升级，不会 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`。
-- 仓库根目录另有几个便捷脚本：`gc.cmd`（clean + test + assembleDebug 门禁）、`gt.cmd`（单测）、`gb.cmd`（assembleDebug）。
+- 便捷门禁脚本在 **`scripts/`** 子目录（不是仓库根目录），且是 **Windows 批处理**：
+  - `scripts\gc.cmd` — clean + test + assembleDebug 全量门禁
+  - `scripts\gt.cmd` — 只跑单测
+  - `scripts\gb.cmd` — 只打 debug 包
+  - macOS / Linux 上这些 `.cmd` 不可用，请直接用上面的 `./gradlew` 等价命令
+- 设备侧工具在 `tools/`（`apk_size_check.py`、`cdp_eval.py`、夹具生成器等），与 `scripts/` 下的 PowerShell 真机脚本（`smoke.ps1`、`install.ps1` 等）配合使用。
 
 ## 安装
 
@@ -59,6 +80,8 @@
 |---|---|
 | `app-armeabi-v7a-debug.apk` / `app-arm64-v8a-debug.apk` | **已签名**，可直接侧载安装 |
 | `app-armeabi-v7a-release-unsigned.apk` / `app-arm64-v8a-release-unsigned.apk` | release 产物，**未签名**，需自行签名后安装 |
+
+各版本包从仓库首页的 **Releases** 下载（自 v0.1.1 起 APK 不再入库，避免仓库体积膨胀）。
 
 首次启动需**同时**授予存储读、写权限（只给写权限会导致目录选择器读不到子文件夹），并指定书库目录。
 
@@ -78,7 +101,11 @@
 - **备份文件名用设备本地时间**：无 RTC 的设备（如 KY-01L）时钟不准，备份名与真实时间不符，跨设备排序会错。
 - SoC 自动侦测未覆盖所有机型，未知机型保守回落（例如 Civi2 的 `2209129SC` 不认，AUTO 档会退到最保守档）。
 - 后台同步的 API 33+ 路径（通知权限、后台启动前台服务限制）尚未真机验证；已有兜底：起不了通知就退回后台静默执行，不会导致整轮同步不跑。
+- **反色的面板/抽屉反色在 1GB 设备上未做真机验证**：目录抽屉全部展开时离屏缓冲峰值较高，低内存机型上是否流畅需要实机确认。
+- 章节检测上限 2000 章：超出的部分无法经目录抵达（可翻页继续读），目录会有截断提示。
 
 ## 文档
 
 `docs/` 下存放需求基线（v1.6）、各阶段交付说明、未闭环项清单与实现差距报告。
+
+`REVIEW_产品功能视角.md` 是 v0.1.6 之前的一次产品功能视角代码审查报告，记录了 43 项发现、两条被证伪的原结论、误报排除记录，以及 v0.1.5→v0.1.6 两批共 46 项修复的逐项说明。

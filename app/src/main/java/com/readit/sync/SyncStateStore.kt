@@ -65,9 +65,13 @@ object SyncStateStore {
         try {
             val tmp = File(f.parentFile, f.name + ".tmp")
             tmp.writeText(gson.toJson(map), Charsets.UTF_8)
-            if (f.exists() && !f.delete()) ReadItLog.w("sync state delete failed")
+            // **先 rename 再删旧的**，不先删。原实现是先 delete 再 rename：
+            // delete 成功、rename 失败时只好退化直写，而直写掉一半掉电就留下截断的
+            // sync_state.json —— 下次启动解析失败、load 返回空 map，于是**所有书都变成
+            // 「无基线」→ 全部判冲突**，同步功能整体瘫掉且无自愈，得手动「重置同步状态」。
+            // 同一卷上的 rename 覆盖本来就是原子的，先删没有任何收益。
             if (!tmp.renameTo(f)) {
-                // rename 失败（少见，跨卷/被占用）时退化直写，保证记录不丢
+                ReadItLog.w("sync state rename failed, fallback to direct write")
                 f.writeText(gson.toJson(map), Charsets.UTF_8)
                 tmp.delete()
             }

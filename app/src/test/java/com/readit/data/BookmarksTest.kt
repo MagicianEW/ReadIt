@@ -175,4 +175,52 @@ class BookmarksTest {
         // 最老的 5 条（at=1..5）被丢掉
         assertFalse(m.items.any { it.charOffset in 1..5 })
     }
+
+    /**
+     * 上一条用例的盲区：那里 offset 与 createdAt **同向**递增，所以「按阅读序裁剪」和
+     * 「按加入时间裁剪」给出同一个答案，测不出实现用错了排序键。
+     *
+     * 真实事故场景是**反向**的：A 设备攒了 200 条书签，全在书的后半段（offset 大）、
+     * 都是老条目；B 设备刚在**书首**（offset 0）加了 1 条，是最新的。
+     * 若先按阅读位置排序再取尾部，B 那条落在首位 → 被裁掉 → 再随合并结果推回云端，
+     * 于是该书签在**两台设备与云端同时消失**且无墓碑可恢复。
+     * 这条用例把 offset 与 createdAt 反向，正是唯一能钉住排序键的构造。
+     */
+    @Test
+    fun `合并超限时不能按阅读位置裁掉另一台设备刚加的书首书签`() {
+        var a = BookmarkFile()
+        // 200 条全在书尾（大 offset），createdAt 是老值
+        for (i in 1..Bookmarks.MAX_PER_BOOK) {
+            a = Bookmarks.add(a, bm(offset = 100_000 + i, at = i.toLong()))
+        }
+        // B 刚加的一条在书首，createdAt 最新
+        val b = Bookmarks.add(BookmarkFile(), bm(offset = 0, at = 9_999_999L))
+
+        val m = Bookmarks.merge(a, b)
+        assertEquals(Bookmarks.MAX_PER_BOOK, m.items.size)
+        assertTrue(
+            "另一台设备刚加的书首书签必须留下",
+            m.items.any { it.charOffset == 0 }
+        )
+        // 被丢的应该是 A 侧最老的那几条
+        assertFalse(m.items.any { it.charOffset == 100_001 })
+    }
+
+    /**
+     * 裁剪键与文档、与 [Bookmarks.add] 保持一致：都按 createdAt 丢最老的。
+     * 两条路径曾经各写一份裁剪且排序键不同，这正是上面那个 bug 的来源。
+     */
+    @Test
+    fun `merge 与 add 的裁剪口径一致`() {
+        var a = BookmarkFile()
+        for (i in 1..Bookmarks.MAX_PER_BOOK) a = Bookmarks.add(a, bm(offset = 100_000 + i, at = i.toLong()))
+        val fresh = bm(offset = 50_000, at = 9_999_999L)
+
+        val viaMerge = Bookmarks.merge(a, Bookmarks.add(BookmarkFile(), fresh))
+        val viaAdd = Bookmarks.add(a, fresh)
+        assertEquals(
+            viaAdd.items.map { it.charOffset }.sorted(),
+            viaMerge.items.map { it.charOffset }.sorted()
+        )
+    }
 }

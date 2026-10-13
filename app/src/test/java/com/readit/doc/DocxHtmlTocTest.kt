@@ -56,14 +56,32 @@ class DocxHtmlTocTest {
         assertTrue(r.isEmpty)
     }
 
+    /**
+     * 媒体引用要改写成**完整相对路径**，不能只留 basename。
+     *
+     * 旧实现只取末段文件名，而 DocxParser 落盘时也只取 basename，于是同名的两张图
+     * （`media/image1.png` 与 `media/sub/image1.png`）互相覆盖，读者看到错图。
+     * 现在两侧统一保留目录层级，所以断言也必须跟着改 ——
+     * 顺带把「同名不串图」这个真实场景钉进用例。
+     */
     @Test
-    fun `media scheme is rewritten to bare filename`() {
-        val html = """<p><img src="readit-media://word/media/image1.png" alt="image"/></p>""" +
-            """<p><img src="readit-media://word/media/sub/pic2.jpeg" alt="image"/></p>"""
+    fun `media scheme is rewritten to full relative path`() {
+        val html = """<p><img src="readit-media://media/image1.png" alt="image"/></p>""" +
+            """<p><img src="readit-media://media/sub/image1.png" alt="image"/></p>""" +
+            """<p><img src="readit-media://media/pic2.jpeg" alt="image"/></p>"""
         val out = DocxHtmlToc.relativizeMedia(html)
-        assertTrue(out.contains("""src="image1.png""""))
-        assertTrue(out.contains("""src="pic2.jpeg""""))
+        assertTrue(out.contains("""src="media/image1.png""""))
+        assertTrue(out.contains("""src="media/sub/image1.png""""))
+        assertTrue(out.contains("""src="media/pic2.jpeg""""))
         assertFalse(out.contains("readit-media://"))
+    }
+
+    /** 单引号属性里也不能漏（防止将来 HTML 改成单引号时静默失效） */
+    @Test
+    fun `media scheme is rewritten inside single quotes`() {
+        val html = """<p><img src='readit-media://media/x.png' alt="image"/></p>"""
+        val out = DocxHtmlToc.relativizeMedia(html)
+        assertTrue(out.contains("""src='media/x.png'"""))
     }
 
     @Test

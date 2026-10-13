@@ -35,6 +35,7 @@ import com.readit.core.text.ChapterDetector
 import com.readit.core.text.Fonts
 import com.readit.core.text.UserFonts
 import com.readit.core.text.EncodingDetector
+import com.readit.core.display.ChromeInversion
 import com.readit.core.display.Inversion
 import com.readit.core.display.RenderMode
 import com.readit.core.display.ScreenProfile
@@ -377,6 +378,10 @@ class ReaderActivity : AppCompatActivity() {
         }
 
         bindTypographyPanel()
+
+        // 开屏就把持久化的反色作用到界面 chrome —— 否则用户带着反色偏好进来，
+        // 正文是黑的、工具栏是白的，只有拨一次开关才一致。
+        ChromeInversion.apply(chromeViews(), prefs.invertEnabled)
     }
 
     // ------------------------------------------------------------------ 视图创建
@@ -455,27 +460,70 @@ class ReaderActivity : AppCompatActivity() {
      *  - 用户以前为这本书选过编码 → 直接用，不再打扰；失效则清掉回退；
      *  - 没选过 → 自动检测；检测失败或**解出来是乱码**（同样两者都要管，否则
      *    `MANUAL_CANDIDATES` 永远没人调用）→ 弹手动选择列表。
+     *
+     * **整段搬进 [io] 线程**：整本 `readText` + 全文章节扫描 + 首次分页都是 O(全书) 的
+     * 工作量，一本 200MB 的 GBK 书在 256MB 堆的墨水屏上会直接 OOM，中等大小的 TXT 也会
+     * 阻塞主线程到 ANR。PDF 与 DOCX 的打开本来就走 `io`，这里是唯一的例外，属于路径间
+     * 的不一致而不是设计。
+     *
+     * mode / showOnly 仍在主线程同步做完：它们决定「本次打开的视图是谁」，
+     * 埋点与编码按钮显隐都依赖它，先定下来才不会中途读到上一次的残留状态。
      */
     private fun openTxt(file: File, saved: ReadingPosition?) {
         mode = ReadMode.TXT
         showOnly(canvas)
 
         val remembered = prefs.charsetFor(bookId)
-        if (remembered != null) {
-            try {
-                applyTxtContent(file, EncodingDetector.readWith(file, remembered), saved, remembered)
-                return
-            } catch (e: Exception) {
-                // 记忆失效（书被换掉、编码名不被平台支持）→ 清掉，回退到自动检测
-                ReadItLog.w("remembered charset unusable: $remembered ${e.message}")
-                prefs.setCharsetFor(bookId, null)
+        io.execute {
+            if (remembered != null) {
+                try {
+                    val text = EncodingDetector.readWith(file, remembered)
+                    val chapters = detectChapters(text)
+                    runOnUiThread { applyTxtContent(file, text, chapters, saved, remembered) }
+                    return@execute
+                } catch (e: Exception) {
+                    // 记忆失效（书被换掉、编码名不被平台支持）→ 清掉，回退到自动检测
+                    ReadItLog.w("remembered charset unusable: $remembered ${e.message}")
+                    prefs.setCharsetFor(bookId, null)
+                }
+            }
+
+            val detected = EncodingDetector.detect(file)
+            val text = tryRead(file, detected?.name())
+            val chapters = detectChapters(text.orEmpty())
+            val garbled = text == null || EncodingDetector.looksGarbled(text)
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                applyTxtContent(file, text ?: "", chapters, saved, detected?.name())
+                if (garbled) askEncoding(file, saved)
             }
         }
+    }
 
-        val detected = EncodingDetector.detect(file)
-        val text = tryRead(file, detected?.name())
-        applyTxtContent(file, text ?: "", saved, detected?.name())
-        if (text == null || EncodingDetector.looksGarbled(text)) askEncoding(file, saved)
+    /**
+     * 章节检测（纯计算，可在 IO 线程跑）。
+     *
+     * 逐行 substring + 每行最多 7 次正则匹配，全书扫描是打开路径上最贵的一段，
+     * 必须与 UI 线程解耦。不可靠时返回空列表，由调用方走纯分页。
+     *
+     * [DetectResult.truncated] 会穿透到 UI：目录撞到 2000 章上限时必须让用户知道
+     * 「后面还有，只是没做出来」，否则表现为「这本书的目录就这么长」。
+     */
+    private fun detectChapters(text: String): ChapterDetector.DetectResult {
+        val r = ChapterDetector.detectDetailed(text)
+        if (!ChapterDetector.isReliable(r.chapters, text.length)) {
+            return ChapterDetector.DetectResult(emptyList(), r.truncated)
+        }
+        return r
+    }
+
+    /** 目录被章节数上限截断时的统一提示（TEXT/DOCX/PDF 三条打开路径共用） */
+    private fun warnChaptersTruncated() {
+        Toast.makeText(
+            this,
+            getString(R.string.toc_truncated, ChapterDetector.DEFAULT_MAX_CHAPTERS),
+            Toast.LENGTH_LONG
+        ).show()
     }
 
     /** 按指定编码整本读取；失败返回 null（不打扰用户，由调用方决定何时提示） */
@@ -486,16 +534,15 @@ class ReaderActivity : AppCompatActivity() {
         null
     }
 
-    /** 把文本交给画布。 `charsetName` 为 null 表示本次是自动检测结果。 */
+    /** 把文本交给画布。 [detected] 由 IO 线程预先算好；`charsetName` 为 null 表示自动检测结果。 */
     private fun applyTxtContent(
         file: File,
         text: String,
+        detected: ChapterDetector.DetectResult,
         saved: ReadingPosition?,
         charsetName: String?
     ) {
-        val chapters = ChapterDetector.detect(text).takeIf { ChapterDetector.isReliable(it, text.length) }
-            ?: emptyList()
-        entries = chapters.map { TocEntry(title = it.title, depth = 0, offset = it.startOffset) }
+        entries = detected.chapters.map { TocEntry(title = it.title, depth = 0, offset = it.startOffset) }
         tocAdapter.submit(entries)
 
         canvas.setDocument(text, saved?.charOffset ?: 0)
@@ -503,6 +550,7 @@ class ReaderActivity : AppCompatActivity() {
             "open txt: ${file.name} chars=${text.length} chapters=${entries.size} " +
                 "charset=${charsetName ?: "auto"}"
         )
+        if (detected.truncated) warnChaptersTruncated()
         RefreshModeManager.requestFullRefresh(canvas)
     }
 
@@ -512,6 +560,8 @@ class ReaderActivity : AppCompatActivity() {
      * 选完先验证：仍乱码就再弹一次让用户继续试（中文书常见的 GBK/GB18030/BIG5
      * 互相之间肉眼难分，一次选中率不高）；验证通过才写进 prefs，避免把一次
      * 误操作固化成永久乱码。
+     *
+     * 试读同样在 [io] 线程：每个候选编码都要**整本**读一遍，主线程做这件事会卡住界面。
      */
     private fun askEncoding(file: File, saved: ReadingPosition?) {
         val items = EncodingDetector.MANUAL_CANDIDATES.toTypedArray()
@@ -519,17 +569,23 @@ class ReaderActivity : AppCompatActivity() {
             .setTitle(R.string.encoding_pick_title)
             .setItems(items) { _, which ->
                 val name = items[which]
-                val text = tryRead(file, name)
-                when {
-                    text == null -> toast(getString(R.string.read_failed))
-                    EncodingDetector.looksGarbled(text) -> {
-                        toast(getString(R.string.encoding_still_garbled, name))
-                        askEncoding(file, saved)
-                    }
-                    else -> {
-                        prefs.setCharsetFor(bookId, name)
-                        applyTxtContent(file, text, saved, name)
-                        toast(getString(R.string.encoding_applied, name))
+                io.execute {
+                    val text = tryRead(file, name)
+                    val garbled = text != null && EncodingDetector.looksGarbled(text)
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        when {
+                            text == null -> toast(getString(R.string.read_failed))
+                            garbled -> {
+                                toast(getString(R.string.encoding_still_garbled, name))
+                                askEncoding(file, saved)
+                            }
+                            else -> {
+                                prefs.setCharsetFor(bookId, name)
+                                applyTxtContent(file, text, detectChapters(text), saved, name)
+                                toast(getString(R.string.encoding_applied, name))
+                            }
+                        }
                     }
                 }
             }
@@ -539,31 +595,52 @@ class ReaderActivity : AppCompatActivity() {
 
     // ------------------------------------------------------------------ EPUB
 
+    /**
+     * EPUB 打开（F03）。
+     *
+     * [EpubParser.parse] 要解 zip + 解析 container/OPF/NCX/toc，是 I/O + XML 的双重开销，
+     * 放在主线程上等于开书即卡；而降级路径的 [EpubTextExtractor] 更要**逐章**读进内存
+     * （zip bomb 或超大章节能在阅读器自身进程 OOM/ANR —— EPUB 侧没有 DOCX 那套进程隔离兜底）。
+     * 两段都搬进 [io]，只有「建视图 / 设内容」这类必须上主线程的部分留在主线程。
+     */
     private fun openEpub(file: File, saved: ReadingPosition?) {
-        val book = try {
-            EpubParser.parse(file)
-        } catch (e: Exception) {
-            ReadItLog.e("epub parse failed", e)
-            Toast.makeText(this, getString(R.string.epub_open_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
-            finish()
-            return
-        }
-        if (book.warnings.isNotEmpty()) ReadItLog.w("epub warnings: ${book.warnings}")
-
-        if (book.encrypted) {
-            Toast.makeText(this, getString(R.string.epub_drm), Toast.LENGTH_LONG).show()
-            finish()
-            return
-        }
-
-        val report = WebViewCapability.probe(this)
-        val tier = Eal.strategy(this)
-        ReadItLog.i("epub route: webview=${report.level} tier=$tier")
-
-        if (report.supportsEpubJs) {
-            openEpubFull(file, book, saved)
-        } else {
-            openEpubText(file, book, saved)
+        Toast.makeText(this, getString(R.string.epub_opening), Toast.LENGTH_SHORT).show()
+        io.execute {
+            var book: EpubParser.Book? = null
+            var errMsg = ""
+            try {
+                book = EpubParser.parse(file)
+            } catch (e: Exception) {
+                errMsg = e.message ?: ""
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val b = book
+                if (b == null) {
+                    ReadItLog.e("epub parse failed: $errMsg")
+                    Toast.makeText(
+                        this,
+                        getString(R.string.epub_open_failed, errMsg),
+                        Toast.LENGTH_LONG
+                    ).show()
+                    finish()
+                    return@runOnUiThread
+                }
+                if (b.warnings.isNotEmpty()) ReadItLog.w("epub warnings: ${b.warnings}")
+                if (b.encrypted) {
+                    Toast.makeText(this, getString(R.string.epub_drm), Toast.LENGTH_LONG).show()
+                    finish()
+                    return@runOnUiThread
+                }
+                val report = WebViewCapability.probe(this)
+                val tier = Eal.strategy(this)
+                ReadItLog.i("epub route: webview=${report.level} tier=$tier")
+                if (report.supportsEpubJs) {
+                    openEpubFull(file, b, saved)
+                } else {
+                    openEpubTextAsync(file, b, saved)
+                }
+            }
         }
     }
 
@@ -572,7 +649,11 @@ class ReaderActivity : AppCompatActivity() {
         val ev = ensureEpubView()
         showOnly(ev)
 
-        entries = book.toc.map { TocEntry(title = it.title, depth = it.depth, spineIndex = it.spineIndex) }
+        // href 一并带上：单个 XHTML 承载多章的书里，相邻目录项的 spineIndex 相同，
+        // 只按下标跳会全部落到该文件开头（要靠 href 里的 #fragment 区分）。
+        entries = book.toc.map {
+            TocEntry(title = it.title, depth = it.depth, spineIndex = it.spineIndex, href = it.href)
+        }
         tocAdapter.submit(entries)
         if (entries.isEmpty()) {
             Toast.makeText(this, getString(R.string.epub_no_toc), Toast.LENGTH_SHORT).show()
@@ -603,36 +684,53 @@ class ReaderActivity : AppCompatActivity() {
                 ).show()
             }
         }
-        Toast.makeText(this, getString(R.string.epub_opening), Toast.LENGTH_SHORT).show()
+        // 「正在打开 EPUB…」由 openEpub 统一弹（解析阶段就要给反馈），这里不再重复一次
         ev.open(file, saved?.cfi, fontPercent(), Fonts.cssFamily(fontId()), prefs.invertEnabled)
     }
 
-    private fun openEpubText(file: File, book: EpubParser.Book, saved: ReadingPosition?) {
-        mode = ReadMode.EPUB_TEXT
-        showOnly(canvas)
+    /** 降级文本路径：抽取在 IO 线程，落内容回主线程 */
+    private fun openEpubTextAsync(file: File, book: EpubParser.Book, saved: ReadingPosition?) {
+        io.execute {
+            var result: EpubTextExtractor.Result? = null
+            var errMsg = ""
+            try {
+                result = EpubTextExtractor().extract(file, book)
+            } catch (e: Exception) {
+                ReadItLog.e("epub text extract failed", e)
+                errMsg = e.message ?: ""
+            }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                val r = result
+                if (r == null) {
+                    Toast.makeText(
+                        this,
+                        getString(R.string.epub_open_failed, errMsg),
+                        Toast.LENGTH_LONG
+                    ).show()
+                    finish()
+                    return@runOnUiThread
+                }
+                mode = ReadMode.EPUB_TEXT
+                showOnly(canvas)
 
-        val result = try {
-            EpubTextExtractor().extract(file, book)
-        } catch (e: Exception) {
-            ReadItLog.e("epub text extract failed", e)
-            Toast.makeText(this, getString(R.string.epub_open_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
-            finish()
-            return
+                val offsets = r.tocOffsets
+                entries = book.toc.mapIndexed { i, e ->
+                    TocEntry(
+                        title = e.title,
+                        depth = e.depth,
+                        offset = offsets.getOrElse(i) { -1 },
+                        spineIndex = e.spineIndex,
+                        href = e.href
+                    )
+                }.filter { it.offset >= 0 }
+                tocAdapter.submit(entries)
+
+                canvas.setDocument(r.text, saved?.charOffset ?: 0)
+                Toast.makeText(this, getString(R.string.epub_degraded), Toast.LENGTH_LONG).show()
+                ReadItLog.i("epub text path: chars=${r.text.length} toc=${entries.size}")
+            }
         }
-
-        entries = book.toc.mapIndexed { i, e ->
-            TocEntry(
-                title = e.title,
-                depth = e.depth,
-                offset = result.tocOffsets.getOrElse(i) { -1 },
-                spineIndex = e.spineIndex
-            )
-        }.filter { it.offset >= 0 }
-        tocAdapter.submit(entries)
-
-        canvas.setDocument(result.text, saved?.charOffset ?: 0)
-        Toast.makeText(this, getString(R.string.epub_degraded), Toast.LENGTH_LONG).show()
-        ReadItLog.i("epub text path: chars=${result.text.length} toc=${entries.size}")
     }
 
     // ------------------------------------------------------------------ DOCX
@@ -646,26 +744,41 @@ class ReaderActivity : AppCompatActivity() {
         Toast.makeText(this, getString(R.string.docx_opening), Toast.LENGTH_SHORT).show()
 
         io.execute {
-            val converted = DocxConverter.convert(applicationContext, file, docxMode)
-            runOnUiThread {
-                if (isFinishing || isDestroyed) return@runOnUiThread
-                if (converted == null || converted.isEmpty) {
-                    ReadItLog.e("docx convert produced nothing: ${file.name} mode=$docxMode")
+            when (val outcome = DocxConverter.convert(applicationContext, file, docxMode)) {
+                is DocxConverter.Result.Failed -> runOnUiThread {
+                    if (isFinishing || isDestroyed) return@runOnUiThread
+                    ReadItLog.e("docx convert failed: ${outcome.reason} timedOut=${outcome.timedOut}")
                     Toast.makeText(
                         this,
-                        getString(R.string.docx_open_failed, file.name),
+                        if (outcome.timedOut) outcome.reason
+                        else getString(R.string.docx_open_failed, file.name),
                         Toast.LENGTH_LONG
                     ).show()
                     finish()
-                    return@runOnUiThread
                 }
-                ReadItLog.i("docx route: mode=$docxMode viaService=${converted.viaService}")
-                if (converted.text != null) {
-                    openDocxText(converted.text, saved)
-                } else {
-                    openDocxHtml(converted, saved)
+                is DocxConverter.Result.Ok -> {
+                    val converted = outcome.converted
+                    runOnUiThread {
+                        if (isFinishing || isDestroyed) return@runOnUiThread
+                        if (converted.isEmpty) {
+                            ReadItLog.e("docx convert produced nothing: ${file.name} mode=$docxMode")
+                            Toast.makeText(
+                                this,
+                                getString(R.string.docx_open_failed, file.name),
+                                Toast.LENGTH_LONG
+                            ).show()
+                            finish()
+                            return@runOnUiThread
+                        }
+                        ReadItLog.i("docx route: mode=$docxMode viaService=${converted.viaService}")
+                        if (converted.text != null) {
+                            openDocxText(converted.text, saved)
+                        } else {
+                            openDocxHtml(converted, saved)
+                        }
+                        notifyDocxDegrade(converted.warnings)
+                    }
                 }
-                notifyDocxDegrade(converted.warnings)
             }
         }
     }
@@ -673,10 +786,10 @@ class ReaderActivity : AppCompatActivity() {
     private fun openDocxText(text: String, saved: ReadingPosition?) {
         mode = ReadMode.DOCX_TEXT
         showOnly(canvas)
-        val chapters = ChapterDetector.detect(text).takeIf { ChapterDetector.isReliable(it, text.length) }
-            ?: emptyList()
-        entries = chapters.map { TocEntry(title = it.title, depth = 0, offset = it.startOffset) }
+        val detected = detectChapters(text)
+        entries = detected.chapters.map { TocEntry(title = it.title, depth = 0, offset = it.startOffset) }
         tocAdapter.submit(entries)
+        if (detected.truncated) warnChaptersTruncated()
         canvas.setDocument(text, saved?.charOffset ?: 0)
         ReadItLog.i("docx text path: chars=${text.length}")
     }
@@ -792,10 +905,11 @@ class ReaderActivity : AppCompatActivity() {
     }
 
     private fun openPdfRender(file: File, saved: ReadingPosition?) {
-        val strategy = Eal.strategy(this)
         val pv = ensurePdfView()
         pv.cropEnabled = prefs.pdfCropEnabled
-        pv.cachePages = strategy.pdfCachedPages
+        // 注意：Eal.strategy(this).pdfCachedPages 故意**不**下发。PdfRenderView 恒为单页常驻
+        // （§5.1 硬要求），曾经存在的 `pv.cachePages` 属性没有任何读取方，
+        // 只会让自审表误以为档位在驱动缓存页数。
         pdfTimeoutStreak = 0
         // 先定 mode 再 showOnly：showOnly 会顺带校准编码入口显隐（见 syncEncodingButton）
         mode = ReadMode.PDF_RENDER
@@ -810,14 +924,26 @@ class ReaderActivity : AppCompatActivity() {
             notePageShown(pv)
         }
         pv.onRenderTimeout = { page ->
-            // R11：单页超时先提示、允许用户翻页绕开；连续超时说明这台机器带不动
-            // Pdfium 渲染档（兜底档 SoC 上的畸形页/慢文档），整本退到文本档比一直白屏有用。
+            // R11：单页超时先提示、允许用户翻页绕开。
+            //
+            // 「连续超时就整本退文本档」这条兜底**不能套用到扫描版 PDF 上**：
+            // 慢的恰恰是大图扫描页，而这正是超时预算最紧的一类书；退到文本档后
+            // 扫描书没有文本层 → `fallbackToPdfText` 末尾 `finish()`，用户看到
+            // 「疑似扫描版→继续导入」、读几页后被弹退出，**重开复现、该书永久打不开**。
+            // 降级方向对扫描书恰好是错的。所以扫描版只提示不降级。
             ReadItLog.w("pdf render timeout: page=$page streak=${pdfTimeoutStreak + 1}")
             pdfTimeoutStreak++
-            if (mode == ReadMode.PDF_RENDER && pdfTimeoutStreak >= PDF_TIMEOUT_STREAK_LIMIT) {
-                fallbackToPdfText(file, "render timeout x$pdfTimeoutStreak")
-            } else if (mode == ReadMode.PDF_RENDER) {
-                Toast.makeText(
+            val scannedBook = prefs.isForceImport(bookId)
+            when {
+                mode != ReadMode.PDF_RENDER -> Unit
+                scannedBook -> Toast.makeText(
+                    this,
+                    getString(R.string.pdf_page_timeout, page + 1),
+                    Toast.LENGTH_SHORT
+                ).show()
+                pdfTimeoutStreak >= PDF_TIMEOUT_STREAK_LIMIT ->
+                    fallbackToPdfText(file, "render timeout x$pdfTimeoutStreak")
+                else -> Toast.makeText(
                     this,
                     getString(R.string.pdf_page_timeout, page + 1),
                     Toast.LENGTH_SHORT
@@ -891,7 +1017,9 @@ class ReaderActivity : AppCompatActivity() {
         ReadItLog.w("pdf text fallback: $reason")
 
         io.execute {
-            val text = try {
+            var text: String? = null
+            var encrypted = false
+            try {
                 val ex = newPdfTextExtractor()
                 try {
                     ex.open(file)
@@ -899,28 +1027,46 @@ class ReaderActivity : AppCompatActivity() {
                     ex.forEachPage { _, pageText ->
                         if (sb.length < MAX_PDF_TEXT_CHARS) sb.append(pageText).append('\n')
                     }
-                    sb.toString()
+                    text = sb.toString()
                 } finally {
                     ex.close()
                 }
             } catch (e: Throwable) {
                 ReadItLog.e("pdf text fallback failed", e)
-                null
+                // 降级路径**也要**查加密。PdfOpenError 的注释早就点出了这个 bug：
+                // 加密 PDF 在 Pdfium 与 PdfBox 都读不了，只在扫描检测阶段查的话，
+                // 用户会依次看到「PDF 渲染失败」+「没有可提取的文本层」两条误导提示，
+                // 真实原因永不出现。
+                encrypted = PdfOpenError.isEncrypted(e)
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
+                if (encrypted) {
+                    ReadItLog.i("pdf encrypted (detected on degrade path) -> 提示不支持")
+                    AlertDialog.Builder(this)
+                        .setTitle(R.string.pdf_encrypted_title)
+                        .setMessage(R.string.pdf_encrypted_message)
+                        .setCancelable(false)
+                        .setPositiveButton(R.string.action_ok) { _, _ -> finish() }
+                        .show()
+                    return@runOnUiThread
+                }
                 if (text.isNullOrBlank()) {
-                    Toast.makeText(this, getString(R.string.pdf_no_text), Toast.LENGTH_LONG).show()
-                    finish()
+                    // 文本兜底为空 = 这本书没有文本层（扫描版）。
+                    // 此时**不能** finish()：用户刚被「疑似扫描版 → 继续导入」放进来，
+                    // 再被「没有可提取的文本层」弹出去，且重开复现 —— 该书永久打不开。
+                    // 正确出口是留在渲染档（哪怕部分页会超时提示），让用户至少能翻。
+                    ReadItLog.w("pdf text fallback empty -> keep render mode (likely scan)")
+                    Toast.makeText(this, getString(R.string.pdf_no_text_keep_render), Toast.LENGTH_LONG).show()
                     return@runOnUiThread
                 }
                 mode = ReadMode.PDF_TEXT
                 syncTypographyPanelForMode()
                 showOnly(canvas)
-                val chapters = ChapterDetector.detect(text)
-                    .takeIf { ChapterDetector.isReliable(it, text.length) } ?: emptyList()
-                entries = chapters.map { TocEntry(title = it.title, depth = 0, offset = it.startOffset) }
+                val detected = detectChapters(text)
+                entries = detected.chapters.map { TocEntry(title = it.title, depth = 0, offset = it.startOffset) }
                 tocAdapter.submit(entries)
+                if (detected.truncated) warnChaptersTruncated()
                 canvas.setDocument(text, 0)
             }
         }
@@ -1215,7 +1361,11 @@ class ReaderActivity : AppCompatActivity() {
             if (valid) { act(); true } else { toastTocEmpty(); false }
         val dispatched: Boolean = when (mode) {
             ReadMode.EPUB_FULL ->
-                ok(entry.spineIndex >= 0 && epubView != null) { epubView?.displaySpine(entry.spineIndex) }
+                // 有 href 就用 href（含 #fragment 精度），退回 spine 下标
+                ok(entry.href != null || entry.spineIndex >= 0) {
+                    val href = entry.href
+                    if (!href.isNullOrBlank()) epubView?.displayHref(href) else epubView?.displaySpine(entry.spineIndex)
+                }
             ReadMode.PDF_RENDER ->
                 ok(entry.pageIndex >= 0 && pdfView != null) { pdfView?.goToPage(entry.pageIndex) }
             ReadMode.DOCX_HTML -> ok(entry.offset >= 0 && docxView != null) {
@@ -1324,13 +1474,17 @@ class ReaderActivity : AppCompatActivity() {
         val tvLine = findViewById<TextView>(R.id.tvLineValue)
         val tvMargin = findViewById<TextView>(R.id.tvMarginValue)
 
-        // 600×800：10-20sp（规范 §5.4）
-        sbFont.max = 20 - MIN_FONT
-        sbFont.progress = (prefs.fontSizeSp.toInt() - MIN_FONT).coerceIn(0, sbFont.max)
-        sbLine.max = 10
-        sbLine.progress = ((prefs.lineSpacing - 1.0f) * 10).toInt().coerceIn(0, 10)
-        sbMargin.max = 24
-        sbMargin.progress = prefs.marginDp.coerceIn(0, 24)
+        // 600×800：10-20sp（规范 §5.4）。范围一律引用 Fonts 的常量，
+        // 不在这里另写一份数字 —— 滑条范围与 ReadItPrefs 的 clamp 范围必须是同一个，
+        // 否则会出现「拖不出来但备份能写进来」的越界值（见 Fonts.clampLineSpacing）。
+        sbFont.max = Fonts.MAX_FONT_SP.toInt() - Fonts.MIN_FONT_SP.toInt()
+        sbFont.progress = (prefs.fontSizeSp.toInt() - Fonts.MIN_FONT_SP.toInt())
+            .coerceIn(0, sbFont.max)
+        sbLine.max = LINE_SPACING_STEPS
+        sbLine.progress = ((prefs.lineSpacing - Fonts.MIN_LINE_SPACING) * LINE_SPACING_STEPS).toInt()
+            .coerceIn(0, LINE_SPACING_STEPS)
+        sbMargin.max = Fonts.MAX_MARGIN_DP
+        sbMargin.progress = prefs.marginDp.coerceIn(Fonts.MIN_MARGIN_DP, Fonts.MAX_MARGIN_DP)
 
         fun syncLabels() {
             tvFont.text = "${prefs.fontSizeSp.toInt()}sp"
@@ -1339,9 +1493,13 @@ class ReaderActivity : AppCompatActivity() {
         }
         syncLabels()
 
+        // 三个滑条共用同一套拖动期策略：拖动中总页数用估算（否则每一格都做一次全书精确分页，
+        // 见 TxtCanvasView.beginInteractiveReflow），松手再补一次精确值。
         sbFont.setOnSeekBarChangeListener(object : SimpleSeekBarListener() {
+            override fun onStartTrackingTouch(seekBar: SeekBar) = canvas.beginInteractiveReflow()
+            override fun onStopTrackingTouch(seekBar: SeekBar) = canvas.endInteractiveReflow()
             override fun onProgressChanged(seekBar: SeekBar, value: Int, fromUser: Boolean) {
-                prefs.fontSizeSp = (value + MIN_FONT).toFloat()
+                prefs.fontSizeSp = (value + Fonts.MIN_FONT_SP.toInt()).toFloat()
                 canvas.fontSizeSp = prefs.fontSizeSp
                 if (mode == ReadMode.EPUB_FULL) epubView?.setFontPercent(fontPercent())
                 if (mode == ReadMode.DOCX_HTML) docxView?.setFontPercent(fontPercent())
@@ -1349,13 +1507,17 @@ class ReaderActivity : AppCompatActivity() {
             }
         })
         sbLine.setOnSeekBarChangeListener(object : SimpleSeekBarListener() {
+            override fun onStartTrackingTouch(seekBar: SeekBar) = canvas.beginInteractiveReflow()
+            override fun onStopTrackingTouch(seekBar: SeekBar) = canvas.endInteractiveReflow()
             override fun onProgressChanged(seekBar: SeekBar, value: Int, fromUser: Boolean) {
-                prefs.lineSpacing = 1.0f + value / 10f
+                prefs.lineSpacing = Fonts.MIN_LINE_SPACING + value / LINE_SPACING_STEPS.toFloat()
                 canvas.lineSpacing = prefs.lineSpacing
                 syncLabels()
             }
         })
         sbMargin.setOnSeekBarChangeListener(object : SimpleSeekBarListener() {
+            override fun onStartTrackingTouch(seekBar: SeekBar) = canvas.beginInteractiveReflow()
+            override fun onStopTrackingTouch(seekBar: SeekBar) = canvas.endInteractiveReflow()
             override fun onProgressChanged(seekBar: SeekBar, value: Int, fromUser: Boolean) {
                 prefs.marginDp = value
                 canvas.marginDp = value
@@ -1402,6 +1564,11 @@ class ReaderActivity : AppCompatActivity() {
      * 自绘画布改 Paint 颜色、Pdfium 挂颜色矩阵滤镜、两条 WebView 注入样式，
      * 都不需要重新分页或重新渲染当前页；最后补一次整屏刷新，
      * 否则墨水屏上会留下半屏旧色（残影）。
+     *
+     * **界面 chrome 也要一起反**（排版面板 / 工具栏 / 页码条 / 目录抽屉）——
+     * 只反正文的话用户看到的是「黑底白字正文 + 一整条白底黑字面板」，
+     * 正是本模式要避免的割裂。这些容器没有各自的反色实现，统一走
+     * [ChromeInversion] 的硬件层滤镜（与 PDF 位图同一套 ColorMatrix）。
      */
     private fun applyInversion(enabled: Boolean, persist: Boolean = true) {
         if (persist) prefs.invertEnabled = enabled
@@ -1409,9 +1576,23 @@ class ReaderActivity : AppCompatActivity() {
         pdfView?.inverted = enabled
         epubView?.setInverted(enabled)
         docxView?.setInverted(enabled)
-        ReadItLog.i("invert applied: enabled=$enabled mode=$mode")
+        ChromeInversion.apply(chromeViews(), enabled)
+        ReadItLog.i("invert applied: enabled=$enabled mode=$mode chrome=${chromeViews().size}")
         RefreshModeManager.requestFullRefresh(activeView())
     }
+
+    /**
+     * 需要参与反色的 chrome 容器。
+     *
+     * **不能**包含 `stage` 或根 `drawer`：它们是内容视图的父级，而内容视图
+     * （自绘画布 / Pdfium / 两条 WebView）各自已实现反色，叠加会变成二次反色。
+     */
+    private fun chromeViews(): List<View> = listOfNotNull(
+        panel,
+        findViewById<View>(R.id.barButtons),
+        pageInfo,
+        tocList
+    )
 
     private open class SimpleSeekBarListener : SeekBar.OnSeekBarChangeListener {
         override fun onProgressChanged(seekBar: SeekBar, value: Int, fromUser: Boolean) {}
@@ -1694,11 +1875,13 @@ class ReaderActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_PATH = "extra_path"
-        private const val MIN_FONT = 10
         private const val SWIPE_MIN = 40f
         private const val BASE_FONT_SP = 14f
         private const val MIN_FONT_PERCENT = 70
         private const val MAX_FONT_PERCENT = 200
+
+        /** 行距滑条格数：把 [Fonts.MIN_LINE_SPACING, Fonts.MAX_LINE_SPACING] 切成这么多档 */
+        private const val LINE_SPACING_STEPS = 10
 
         /** 降级提示最多列几条，避免 600×800 上弹窗被撑爆 */
         private const val MAX_DEGRADE_LINES = 6

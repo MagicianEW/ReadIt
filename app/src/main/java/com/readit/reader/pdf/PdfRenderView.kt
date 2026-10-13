@@ -33,8 +33,9 @@ import java.util.concurrent.ExecutorService
  * 线程模型：位图渲染在工作线程做，渲染完成 post 回主线程换页并 invalidate。
  * 用递增的 renderSeq 丢弃过期结果 —— 用户连点翻页时旧页回来不能覆盖新页。
  *
- * 内存约束：任一时刻只持有 1 张页位图（低内存档 pdfCachedPages=1 的口径），
- * 换页时立即 recycle 上一张。
+ * 内存约束：任一时刻只持有 1 张页位图（§5.1「PDF 单页位图」的硬要求），
+ * 换页时立即 recycle 上一张。档位里的 [com.readit.core.eal.RenderStrategy.pdfCachedPages]
+ * **没有**接到这里 —— 接上就等于给墨水屏设备开多页位图常驻，正是 LOW 档要防的 OOM。
  */
 class PdfRenderView @JvmOverloads constructor(
     context: Context,
@@ -75,6 +76,9 @@ class PdfRenderView @JvmOverloads constructor(
     private var page: Bitmap? = null
     private var seq = 0
 
+    /** 尚未触发的渲染看门狗；release() 时统一撤掉（见 cancelWatchdogs） */
+    private val watchdogs = mutableListOf<Runnable>()
+
     /** 已成功落到屏幕上的最大序号；看门狗用它区分「还在渲染」与「渲染完了但 seq 已变」 */
     private var completedSeq = 0
     private var renderedWidth = 0
@@ -92,9 +96,6 @@ class PdfRenderView @JvmOverloads constructor(
                 invalidate()
             }
         }
-
-    /** 渲染策略里的缓存页数，仅用于日志/后续预取，当前实现恒为单页常驻 */
-    var cachePages: Int = 1
 
     /**
      * 单页渲染超时（R11 缓解措施之一）。
@@ -166,10 +167,15 @@ class PdfRenderView @JvmOverloads constructor(
 
     fun release() {
         seq++
-        recyclePage()
-        runCatching { core.close() }
+        // 顺序要紧：**先**断渲染任务，**再**关 native 文档。
+        // 原实现反过来（先 core.close() 后 shutdownNow()），于是「翻页后立刻按返回键」
+        // 会让主线程 FPDF_CloseDocument 与渲染线程 FPDF_RenderPageBitmap 并发操作同一
+        // fpdf_doc_t → native use-after-free / SIGSEGV，runCatching 拦不住信号。
         executor?.shutdownNow()
         executor = null
+        cancelWatchdogs()
+        recyclePage()
+        runCatching { core.close() }
     }
 
     override fun onDetachedFromWindow() {
@@ -212,12 +218,26 @@ class PdfRenderView @JvmOverloads constructor(
 
         // R11 看门狗：到点还没拿到这一页的位图就报超时。
         // 只认「自己还是最新请求」的情况 —— 用户连点翻页时旧页的超时不该再打扰上层。
-        main.postDelayed({
+        val wd = Runnable {
             if (mySeq == seq && completedSeq < mySeq) {
                 ReadItLog.w("pdf render timeout after ${renderTimeoutMs}ms at page $index")
                 onRenderTimeout?.invoke(index)
             }
-        }, renderTimeoutMs)
+        }
+        watchdogs += wd
+        main.postDelayed(wd, renderTimeoutMs)
+    }
+
+    /**
+     * 清掉尚未触发的看门狗。
+     *
+     * 原来每次翻页都往主线程队列压一个 8s 后才执行的 runnable，只靠 `mySeq == seq` 自我作废。
+     * 连翻 20 页就是 20 个待执行任务，各自带一个捕获 view/Activity 的 lambda；
+     * release() 之后这些任务仍会出队并持有已销毁的视图。
+     */
+    private fun cancelWatchdogs() {
+        watchdogs.forEach { runCatching { main.removeCallbacks(it) } }
+        watchdogs.clear()
     }
 
     private fun crop(src: Bitmap): Bitmap {

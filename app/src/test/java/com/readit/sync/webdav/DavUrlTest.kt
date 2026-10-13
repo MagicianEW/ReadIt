@@ -163,4 +163,61 @@ class DavUrlTest {
         val client = WebDavClient("https://dav.example.com/dav/", "u", "p", "/books/")
         assertEquals("https://dav.example.com/dav/books/book.txt", client.urlOf("book.txt"))
     }
+
+    // ---------------------------------------------------------------- userinfo
+
+    @Test
+    fun `normalizeInput strips embedded credentials`() {
+        // 凭据写进 URL 的唯一后果是：每条失败请求的异常消息里都带着它，
+        // 而异常消息会进 logcat。密码字段本来是独立的，这里必须剥掉。
+        assertEquals(
+            "http://192.168.1.10:5005/webdav",
+            DavUrl.normalizeInput("http://admin:s3cr3t@192.168.1.10:5005/webdav")
+        )
+    }
+
+    @Test
+    fun `normalizeInput strips credentials even when scheme is missing`() {
+        assertEquals(
+            "http://nas.local/dav",
+            DavUrl.normalizeInput("admin:s3cr3t@nas.local/dav")
+        )
+    }
+
+    @Test
+    fun `hasUserInfo detects embedded credentials`() {
+        assertTrue(DavUrl.hasUserInfo("http://u:p@nas.local/dav"))
+        assertTrue(DavUrl.hasUserInfo("u@nas.local/dav"))
+        assertFalse(DavUrl.hasUserInfo("http://nas.local/dav"))
+        assertFalse(DavUrl.hasUserInfo(""))
+    }
+
+    @Test
+    fun `at sign inside path is not treated as userinfo`() {
+        // 路径里的 @ 是合法字符（某些 DAV 路径就用它），不能被吃掉。
+        assertEquals(
+            "https://dav.example.com/remote.php/dav/files/user@host",
+            DavUrl.stripUserInfo("https://dav.example.com/remote.php/dav/files/user@host")
+        )
+        assertFalse(DavUrl.hasUserInfo("https://dav.example.com/dav/user@host"))
+    }
+
+    @Test
+    fun `originOf never carries credentials into request urls`() {
+        assertEquals(
+            "https://dav.example.com",
+            DavUrl.originOf("https://u:p@dav.example.com/dav")
+        )
+        // resolve 是所有请求 URL 的唯一出口：它必须经由 originOf
+        assertEquals(
+            "https://dav.example.com/remote.php/dav/files/u/ReadIt/book.txt",
+            DavUrl.resolve("https://u:p@dav.example.com/dav/", "/remote.php/dav/files/u/ReadIt/book.txt")
+        )
+    }
+
+    @Test
+    fun `userinfo only credential is stripped leaving host intact`() {
+        assertEquals("http://nas.local", DavUrl.stripUserInfo("http://user@nas.local"))
+        assertEquals("http://nas.local", DavUrl.stripUserInfo("http://:pass@nas.local"))
+    }
 }

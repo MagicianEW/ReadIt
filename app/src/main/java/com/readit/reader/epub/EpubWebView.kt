@@ -9,6 +9,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -66,6 +67,37 @@ class EpubWebView @JvmOverloads constructor(
     /** 反色状态（F27）；reader.html 侧自己维护同名标志，这里只负责投递 */
     private var inverted: Boolean = false
 
+    /**
+     * 本次打开的书籍绝对路径 —— 请求白名单里**唯一**允许的沙箱外文件。
+     *
+     * 为什么需要白名单：`allowFileAccessFromFileURLs` 必须为 true（epub.js 用 file:// XHR 读书），
+     * 而章节 XHTML 与 `file:///android_asset/reader.html` 同源，所以书里的 `<script>` 与 reader.html
+     * 处在同一个源里 —— 只要没有这层拦截，它就能 XHR 任意 file:// 路径。
+     * 本应用持有 MANAGE_EXTERNAL_STORAGE，SD 卡上的书全在射程内。
+     * 白名单是唯一可靠的闸门：WebViewClient.shouldInterceptRequest 对**所有帧**（含 iframe 与
+     * XHR）的资源请求生效，书内脚本绕不过去。
+     */
+    @Volatile
+    private var allowedBookPath: String? = null
+
+    /**
+     * 请求白名单：只放行 assets 与本次打开的那一本书，其余一律拒绝。
+     *
+     * 放行的三类：
+     *  - `android_asset` 下的 reader.html、jszip.min.js、epub.min.js、打包字体；
+     *  - 本次打开的书籍文件（`file://` + 绝对路径）；
+     *  - `blob:` / `data:` —— epub.js 用 JSZip 把章节与图片转成 blob 注入 iframe，
+     *    这两类不经过本回调，但放行以防不同 ROM 把它派发过来。
+     */
+    private fun allowResource(url: String?): Boolean {
+        if (url.isNullOrEmpty()) return false
+        if (url.startsWith("blob:") || url.startsWith("data:")) return true
+        if (url.startsWith(ASSET_URL.substringBefore("reader.html"))) return true
+        val book = allowedBookPath ?: return false
+        // 容忍 %20 等百分号编码差异：URL 里的空格会被编码，路径不会
+        return url == "file://$book" || url == "file://${book.replace(" ", "%20")}"
+    }
+
     init {
         configure()
         loadUrl(ASSET_URL)
@@ -79,10 +111,15 @@ class EpubWebView @JvmOverloads constructor(
         if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         settings.apply {
             javaScriptEnabled = true
+            // 书籍本体经 file:// XHR 读入（epub.js 的 ePub(url) 走 XHR），故 file 访问必须开。
+            // 真正的闸门不是这两个开关，而是 allowFileAccessFromFileURLs + shouldInterceptRequest 白名单
+            // （见 configure() 内的注释与 allowResource）。
             allowFileAccess = true
             allowContentAccess = true
             allowFileAccessFromFileURLs = true
-            allowUniversalAccessFromFileURLs = true
+            // 跨源读取必须关：EPUB 里的章节 XHTML 与 reader.html 同源（都是 file://），
+            // 开着它书内脚本就能读任意 origin 的内容。安全读取靠下面的请求白名单兜底。
+            allowUniversalAccessFromFileURLs = false
             domStorageEnabled = true
             databaseEnabled = false
             defaultTextEncodingName = "utf-8"
@@ -91,7 +128,11 @@ class EpubWebView @JvmOverloads constructor(
             builtInZoomControls = false
             displayZoomControls = false
             loadWithOverviewMode = false
-            blockNetworkImage = false
+            // 断外网：EPUB 是纯本地渲染，联网一律没有正当理由。
+            // 恶意书内脚本的真正危害是「读走 SD 卡上的书再 POST 出去」，断网即断掉外传通道。
+            // 与 DocxWebView 同一口径。
+            blockNetworkImage = true
+            blockNetworkLoads = true
         }
         setBackgroundColor(Inversion.backColor(false))
         isVerticalScrollBarEnabled = false
@@ -109,6 +150,30 @@ class EpubWebView @JvmOverloads constructor(
                     doOpen(p)
                 }
             }
+
+            /**
+             * 资源白名单（安全闸门，见 [allowedBookPath] 的说明）。
+             *
+             * 命中白名单返回 null = 交给 WebView 正常加载；否则返回空响应而不是抛异常，
+             * 让被拦下的请求安静失败（书里的远程图片/外链本来就该加载不出来，
+             * 不该让整页渲染失败）。
+             */
+            override fun shouldInterceptRequest(
+                view: WebView,
+                request: WebResourceRequest
+            ): WebResourceResponse? {
+                val url = request.url?.toString()
+                if (allowResource(url)) return null
+                ReadItLog.w("epub request blocked: $url")
+                return WebResourceResponse("text/plain", "utf-8", null)
+            }
+
+            @Suppress("OVERRIDE_DEPRECATION")
+            override fun shouldInterceptRequest(view: WebView, url: String): WebResourceResponse? =
+                if (allowResource(url)) null else {
+                    ReadItLog.w("epub request blocked: $url")
+                    WebResourceResponse("text/plain", "utf-8", null)
+                }
 
             @Suppress("OVERRIDE_DEPRECATION")
             override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
@@ -179,6 +244,8 @@ class EpubWebView @JvmOverloads constructor(
         // 单调时钟：墙钟会被 NTP 校时回拨，差值可能为负（与 core/util/Metrics.kt 口径一致）
         openStartedAt = android.os.SystemClock.elapsedRealtime()
         lastCfi = p.cfi.orEmpty()
+        // 先把白名单放行到这本书，再发起加载（epub.js 的 XHR 紧随其后）
+        allowedBookPath = p.file.absolutePath
         val url = "file://" + p.file.absolutePath
         val js = "ReadItEpub.open(${JSONObject.quote(url)}, ${JSONObject.quote(p.cfi.orEmpty())}, " +
             "${p.fontPercent}, ${JSONObject.quote(p.fontFamily)}, ${p.inverted});"
@@ -188,6 +255,19 @@ class EpubWebView @JvmOverloads constructor(
     /** 目录跳转：传 spine 下标（epub.js spine.get 对 number 直接按下标取，最稳） */
     fun displaySpine(index: Int) {
         post { evaluateJavascript("ReadItEpub.display($index);", null) }
+    }
+
+    /**
+     * 目录跳转：传目录原始 href（**含** `#fragment`）。
+     *
+     * epub.js 的 `rendition.display(target)` 对字符串会走 `Contents.locate` 解析，
+     * 因此能定位到「同一个 XHTML 内的某个锚点」——只传 spine 下标时，
+     * 同一文件承载的多个子章节会全部跳到文件开头。
+     */
+    fun displayHref(href: String) {
+        post {
+            evaluateJavascript("ReadItEpub.displayHref(${JSONObject.quote(href)});", null)
+        }
     }
 
     fun displayCfi(cfi: String) {
@@ -273,6 +353,20 @@ class EpubWebView @JvmOverloads constructor(
         fun onError(message: String) {
             ReadItLog.e("epub js error: $message")
             post { callback?.onError(message) }
+        }
+
+        /**
+         * 存档 CFI 已失效（reader.html 侧 display(cfi) reject 后回落第 0 章时触发）。
+         *
+         * 必须把 [lastCfi] 清空，否则 `currentCfi()` 会继续返回那个坏值：
+         * 1. `ProgressPolicy` 只在 cfi **为空**时才 Skip，空字符串正好触发回落；
+         * 2. 下一次 `onLocation` 回调会写入新位置，坏值自然被覆盖。
+         * 不清的话坏 CFI 会被 onPause 一路写回磁盘，用户每次打开都是白屏。
+         */
+        @JavascriptInterface
+        fun onCfiInvalid(cfi: String) {
+            ReadItLog.w("epub stored CFI invalid, cleared (was='$lastCfi')")
+            lastCfi = ""
         }
     }
 

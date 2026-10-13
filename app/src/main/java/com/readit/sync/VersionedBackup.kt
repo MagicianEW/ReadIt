@@ -10,6 +10,7 @@ import com.readit.data.prefs.ReadItPrefs
 import com.readit.sync.webdav.WebDavClient
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -82,7 +83,14 @@ class VersionedBackup(
                 ZipOutputStream(out).use { zos -> writeEntries(context, zos, at) }
             }
             ReadItLog.i("backup packed: $name (${zip.length()}B)")
-            client.upload(name, zip, remoteEtag = null, createOnly = false)
+            // `createOnly = true`：备份是**历史版本**，同秒内连按两次「创建备份」时
+            // 原实现用 `createOnly = false` 无条件覆盖，于是先写的那份历史无声消失、
+            // 且没有任何版本号可回退。撞名时宁可让这一次失败并提示，也不要抹掉历史。
+            try {
+                client.upload(name, zip, remoteEtag = null, createOnly = true)
+            } catch (e: WebDavClient.ConflictException) {
+                throw IOException("同一秒内已有同名备份（$name），请稍后再试", e)
+            }
             return name
         } finally {
             zip.delete()
@@ -137,11 +145,16 @@ class VersionedBackup(
                         }
                         safeName.startsWith("$DIR_PROGRESS/") -> {
                             val dest = File(ProgressStore.dir(context), safeName.removePrefix("$DIR_PROGRESS/"))
-                            if (writeFile(dest, bytes)) progress++
+                            // 必须先校验再覆盖：writeFile 只做 tmp+rename，不看内容。
+                            // 坏条目（原实现直接写）会把本机那份正常进度覆盖掉，
+                            // 之后 ProgressStore.load 解析失败返回 null → **进度归零且不报错**，
+                            // 而且还把 progress++ 计入「恢复成功」。配置文件那条路径有
+                            // ConfigBackup.parse 挡着，进度/书签原来没有。
+                            if (writeVerifiedJson(dest, bytes)) progress++
                         }
                         safeName.startsWith("$DIR_BOOKMARKS/") -> {
                             val dest = File(BookmarkStore.dir(context), safeName.removePrefix("$DIR_BOOKMARKS/"))
-                            if (writeFile(dest, bytes)) bookmarks++
+                            if (writeVerifiedJson(dest, bytes)) bookmarks++
                         }
                         else -> ReadItLog.w("backup restore: 未知条目 $safeName，跳过")
                     }
@@ -247,5 +260,29 @@ class VersionedBackup(
     } catch (e: Exception) {
         ReadItLog.w("backup restore: 写入 ${dest.name} 失败: ${e.message}")
         false
+    }
+
+    /**
+     * 写一个 JSON 侧车文件，但**先验证内容是合法 JSON**再落盘。
+     *
+     * 恢复路径与 [writeFile] 的区别正在这里：writeFile 是「无条件覆盖」，
+     * 用于统计那种没有结构约束的文件；而进度 / 书签是结构化 JSON，
+     * 坏条目（zip 传输截断、手工改坏）写下去会让 load() 解析失败返回 null，
+     * 用户表现是**进度归零 / 书签全丢且没有任何报错**。
+     * 宁可这一条不恢复（计数不加、留旧值），也不能覆盖掉本机那份好的。
+     */
+    private fun writeVerifiedJson(dest: File, bytes: ByteArray): Boolean {
+        val text = try {
+            String(bytes, Charsets.UTF_8)
+        } catch (e: Exception) {
+            ReadItLog.w("backup restore: ${dest.name} 不是合法 UTF-8，跳过")
+            return false
+        }
+        val ok = runCatching { com.google.gson.JsonParser.parseString(text) }.isSuccess
+        if (!ok) {
+            ReadItLog.w("backup restore: ${dest.name} 不是合法 JSON，跳过（保留本机原值）")
+            return false
+        }
+        return writeFile(dest, bytes)
     }
 }

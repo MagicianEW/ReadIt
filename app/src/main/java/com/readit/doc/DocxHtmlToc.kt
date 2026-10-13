@@ -73,13 +73,17 @@ object DocxHtmlToc {
         "javascript:(function(){var e=document.getElementById('$ANCHOR_PREFIX$id');" +
             "if(e){e.scrollIntoView(true);}})()"
 
-    private val MEDIA_SRC = Regex("""readit-media://[^"]*/([^"/]+)""")
+    // 捕获 scheme 之后的**完整相对路径**（含子目录），不是 basename。
+    // (?!//) 防止把 `readit-media://` 自身的双斜杠当成路径起点。
+    private val MEDIA_SRC = Regex("""readit-media://(?!//)([^"']+)""")
 
     /**
-     * 把 [DocxParser.IMG_SCHEME] 引用改成「与 HTML 同目录的裸文件名」。
+     * 把 [DocxParser.IMG_SCHEME] 引用改成「与 HTML 同目录的相对路径」。
      *
-     * [DocxParser] 把内嵌图片落盘时只取 basename（`word/media/image1.png` → `image1.png`），
-     * 而 WebView 通过 `loadDataWithBaseURL(outDir)` 加载，相对路径即可命中，
+     * [DocxParser] 落盘时保留 `Target` 的目录层级（`word/media/image1.png` → `media/image1.png`、
+     * `word/media/sub/image1.png` → `media/sub/image1.png`），因此这里必须整段路径一起搬：
+     * 只留 basename 会让同名的两张图指向同一个文件，读者看到错图。
+     * WebView 通过 `loadDataWithBaseURL(outDir)` 加载，相对路径即可命中，
      * 不需要自定义 scheme 拦截（少一层 shouldInterceptRequest，E-Ink 上更快）。
      */
     fun relativizeMedia(html: String): String =

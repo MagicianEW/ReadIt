@@ -62,10 +62,18 @@ enum class PerfTier(val key: String) {
 /** assets/readit_device_profiles.json 中的单条设备配置 */
 data class DeviceProfile(
     var brand: String = "",
+    /**
+     * `Build.MODEL` 的精确值，或以 `*` 结尾的前缀通配（见 [DeviceProfileDetector.findMatch]）。
+     */
     var model: String = "",
     var device: String = "",
     var socClass: String = SocClass.A33_CLASS.key,
-    var ramClass: String = RamClass.LOW.key,
+    /**
+     * 标称分辨率，**仅供人读**（社区贡献画像时记录机型用）。
+     *
+     * 运行时一律用 [DeviceProfileDetector] 实测的 `getRealMetrics` —— 表里的值不参与
+     * 任何判断，且与方向有关（同一台机器横竖屏就是两个值），写死必然和实测对不上。
+     */
     var resolution: String = "",
     var refreshMode: String = RefreshMode.AUTO.key,
     /*
@@ -78,7 +86,6 @@ data class DeviceProfile(
     var notes: String = ""
 ) {
     val soc: SocClass get() = SocClass.from(socClass)
-    val ram: RamClass get() = RamClass.from(ramClass)
     val refresh: RefreshMode get() = RefreshMode.from(refreshMode)
     val isEmpty: Boolean get() = brand.isEmpty() && model.isEmpty() && device.isEmpty()
 }

@@ -1,28 +1,26 @@
 {
   "app": "ReadIt",
-  "version": 2,
+  "version": 3,
   "devices": [
     {
       "brand": "KYOCERA",
       "model": "KY-01L",
       "device": "ky01l",
       "socClass": "A33_CLASS",
-      "ramClass": "LOW",
-      "resolution": "600x480",
+      "resolution": "480x600",
       "refreshMode": "QUALITY",
       "input_keys": {
         "PAGE_UP": "KEYCODE_PAGE_UP",
         "PAGE_DOWN": "KEYCODE_PAGE_DOWN",
         "BACK": "KEYCODE_BACK"
       },
-      "notes": "600x480; Android 7.1; docomo定制固件，第三方APK需ADB侧载；出厂WebView约Chromium 52，不可升级 -> EPUB走降级路径"
+      "notes": "竖屏 480x600（横屏时才是 600x480，resolution 仅供人读，运行时一律实测）；Android 7.1；docomo定制固件，第三方APK需ADB侧载；出厂WebView约Chromium 52，不可升级 -> EPUB走降级路径"
     },
     {
       "brand": "ONYX",
-      "model": "BOOX",
-      "device": "boox",
+      "model": "BOOX*",
+      "device": "",
       "socClass": "A53_CLASS_OR_ABOVE",
-      "ramClass": "MID",
       "resolution": "1872x1404",
       "refreshMode": "REGAL",
       "input_keys": {
@@ -30,18 +28,7 @@
         "PAGE_DOWN": "KEYCODE_PAGE_DOWN",
         "BACK": "KEYCODE_BACK"
       },
-      "notes": "Onyx/Boox 走 EPD SDK 反射路径"
-    },
-    {
-      "brand": "unknown",
-      "model": "generic_600x800",
-      "device": "generic_eink_6",
-      "socClass": "A33_CLASS",
-      "ramClass": "LOW",
-      "resolution": "600x800",
-      "refreshMode": "AUTO",
-      "input_keys": {},
-      "notes": "6英寸入门E-Ink主流分辨率，UI兜底验收基准"
+      "notes": "model 用 BOOX* 前缀通配：Onyx 各型号的 Build.MODEL 并不统一（BOOX / Nova / Likee / 页翻等），写死一个全等值只能碰巧命中一台机器。Onyx/Boox 走 EPD SDK 反射路径"
     }
   ],
   "fallback_rules": {

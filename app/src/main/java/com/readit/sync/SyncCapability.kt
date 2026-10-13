@@ -71,4 +71,18 @@ object SyncCapability {
      */
     fun shouldSchedule(apiLevel: Int, enabled: Boolean, configured: Boolean): Boolean =
         enabled && configured && modeOf(apiLevel) != Mode.MANUAL_ONLY
+
+    /**
+     * 「本进程内已经 schedule 过」的标记。
+     *
+     * 只服务 API 21-23：那里没有 `allPendingJobs`，无法查询任务是否已存在，
+     * 而 `schedule()` 对同一 id 是**替换**语义、会重置周期计时器。若一律当成
+     * 「没挂过」而每次冷启动都重排，用户每天开一次应用，24h 计时器就永远被清零，
+     * 一次都不会触发。API 24+ 走 `allPendingJobs` 的真实查询，不依赖本标记。
+     *
+     * 取消任务时必须复位（见 [SyncScheduler]），否则改了配置也不会重新排。
+     */
+    @Volatile
+    @JvmStatic
+    var jobScheduledInProcess: Boolean = false
 }

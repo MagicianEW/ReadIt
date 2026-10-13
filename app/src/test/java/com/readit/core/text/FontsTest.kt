@@ -141,4 +141,40 @@ class FontsTest {
         assertTrue(Fonts.DEFAULT_SIZE_SP >= Fonts.MIN_FONT_SP)
         assertTrue(Fonts.DEFAULT_SIZE_SP <= Fonts.MAX_FONT_SP)
     }
+
+    // ------------------------------------------------- 行距 / 边距 clamp
+
+    /**
+     * 行距与边距原先**没有**任何 clamp，而字号的 [Fonts.clampFontSizeSp] 有 ——
+     * 三个排版参数处理不对称。用户拖滑条只能拖出合法值，但配置备份 / 跨设备恢复 /
+     * 系统 SharedPreferences 还原都能带进越界值，而后果是致命的：
+     *  - `lineSpacing <= 0` → `TxtCanvasView.onDraw` 里所有行叠在同一基线上；
+     *  - `lineSpacing` 为 NaN → `y += NaN` 让 `y > bottomLimit` 恒假且 drawText 落在
+     *    非法坐标，整页空白；
+     *  - `marginDp` 过大 → 可用宽度算出非正数，`Paint.breakText` 返回 0，
+     *    绘制循环的 `start` 永不推进，**主线程 100% 死循环**。
+     */
+    @Test
+    fun lineSpacingIsClamped() {
+        assertEquals(1.0f, Fonts.clampLineSpacing(0f), 0f)
+        assertEquals(1.0f, Fonts.clampLineSpacing(-3f), 0f)
+        assertEquals(2.0f, Fonts.clampLineSpacing(9f), 0f)
+        assertEquals(1.5f, Fonts.clampLineSpacing(1.5f), 0f)
+        // NaN 必须回落到默认值，而不是让 NaN 传播进绘制循环
+        assertEquals(Fonts.DEFAULT_LINE_SPACING, Fonts.clampLineSpacing(Float.NaN), 0f)
+    }
+
+    @Test
+    fun marginDpIsClamped() {
+        assertEquals(0, Fonts.clampMarginDp(-5))
+        assertEquals(24, Fonts.clampMarginDp(999))
+        assertEquals(12, Fonts.clampMarginDp(12))
+    }
+
+    @Test
+    fun typographyDefaultsAreInsideRange() {
+        assertTrue(Fonts.DEFAULT_LINE_SPACING >= Fonts.MIN_LINE_SPACING)
+        assertTrue(Fonts.DEFAULT_LINE_SPACING <= Fonts.MAX_LINE_SPACING)
+        assertTrue(Fonts.DEFAULT_MARGIN_DP in Fonts.MIN_MARGIN_DP..Fonts.MAX_MARGIN_DP)
+    }
 }

@@ -51,16 +51,24 @@ class ProgressSync(private val client: WebDavClient) {
         val pulledProgress: List<String>,
         val pushedProgress: List<String>,
         val mergedBookmarks: List<String>,
+        /**
+         * 远端侧车存在但 JSON 损坏、已用本地那份覆盖修复的书名。
+         *
+         * 单独列出来是因为**远端那份数据已经不可恢复**了：用户必须知道有过这么一次，
+         * 否则「静默覆盖」看起来一切正常，实际上另一台设备上的进度/书签可能已经丢了。
+         */
+        val corruptRemote: List<String>,
         val failed: List<Pair<String, String>>,
         val elapsedMs: Long
     ) {
         val isEmpty: Boolean
             get() = pulledProgress.isEmpty() && pushedProgress.isEmpty() &&
-                mergedBookmarks.isEmpty() && failed.isEmpty()
+                mergedBookmarks.isEmpty() && failed.isEmpty() && corruptRemote.isEmpty()
 
         fun summary(): String = buildString {
             append("进度 ↓${pulledProgress.size} ↑${pushedProgress.size}")
             append(" · 书签 ${mergedBookmarks.size}")
+            if (corruptRemote.isNotEmpty()) append(" · 远端损坏已修复 ${corruptRemote.size}")
             if (failed.isNotEmpty()) append(" · 失败 ${failed.size}")
             append(" · ${elapsedMs}ms")
         }
@@ -72,6 +80,7 @@ class ProgressSync(private val client: WebDavClient) {
         val pulled = ArrayList<String>()
         val pushed = ArrayList<String>()
         val mergedBm = ArrayList<String>()
+        val corrupt = ArrayList<String>()
         val failed = ArrayList<Pair<String, String>>()
 
         val remote = try {
@@ -79,7 +88,7 @@ class ProgressSync(private val client: WebDavClient) {
         } catch (e: Exception) {
             ReadItLog.e("progress sync list failed", e)
             return Report(
-                emptyList(), emptyList(), emptyList(),
+                emptyList(), emptyList(), emptyList(), emptyList(),
                 listOf("*" to (e.message ?: "list failed")),
                 System.currentTimeMillis() - started
             )
@@ -92,15 +101,23 @@ class ProgressSync(private val client: WebDavClient) {
         for (r in remoteProgress) {
             val safe = idOf(r.displayName, PREFIX_PROGRESS) ?: continue
             try {
-                val remotePos = downloadPosition(context, r, safe)
-                when (val d = ProgressMerge.decide(ProgressStore.load(context, safe), remotePos)) {
-                    is ProgressMerge.Decision.Identical -> Unit
-                    is ProgressMerge.Decision.TakeRemote -> {
-                        ProgressStore.save(context, safe, d.pos)
-                        pulled.add(safe)
-                    }
-                    is ProgressMerge.Decision.KeepLocal -> {
+                when (val dl = downloadPosition(context, r, safe)) {
+                    // 下载失败：远端状态未知，本轮**不动**它（不能当成「远端没有」而覆盖）
+                    is Remote.Absent -> Unit
+                    // 远端损坏：用本地那份修复它，但要记账，让用户看得见
+                    is Remote.Corrupt -> {
+                        corrupt.add(safe)
                         if (pushProgress(context, safe)) pushed.add(safe)
+                    }
+                    is Remote.Value -> when (val d = ProgressMerge.decide(ProgressStore.load(context, safe), dl.value)) {
+                        is ProgressMerge.Decision.Identical -> Unit
+                        is ProgressMerge.Decision.TakeRemote -> {
+                            ProgressStore.save(context, safe, d.pos)
+                            pulled.add(safe)
+                        }
+                        is ProgressMerge.Decision.KeepLocal -> {
+                            if (pushProgress(context, safe)) pushed.add(safe)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -111,7 +128,7 @@ class ProgressSync(private val client: WebDavClient) {
 
         // ---- 进度：本地有、远端没有 → 上行
         val remoteProgressIds = remoteProgress.mapNotNull { idOf(it.displayName, PREFIX_PROGRESS) }.toSet()
-        for (f in listJson(context, ProgressStore.dir(context))) {
+        for (f in listJson(ProgressStore.dir(context))) {
             val safe = f.name.removeSuffix(SUFFIX)
             if (safe in remoteProgressIds) continue
             try {
@@ -126,13 +143,25 @@ class ProgressSync(private val client: WebDavClient) {
         for (r in remoteBookmarks) {
             val safe = idOf(r.displayName, PREFIX_BOOKMARKS) ?: continue
             try {
-                if (mergeBookmarks(context, safe, downloadBookmarks(context, r, safe))) mergedBm.add(safe)
+                when (val dl = downloadBookmarks(context, r, safe)) {
+                    // 下载失败：远端状态未知，本轮不动（见 downloadBookmarks 的说明）
+                    is Remote.Absent -> Unit
+                    // 远端损坏：用本地修复并记账。注意这里**不能**拿空 BookmarkFile 去 merge，
+                    // 那等于把「远端坏了」当成「远端没有」，覆盖掉却毫无痕迹
+                    is Remote.Corrupt -> {
+                        corrupt.add(safe)
+                        if (mergeBookmarks(context, safe, null)) mergedBm.add(safe)
+                    }
+                    is Remote.Value -> {
+                        if (mergeBookmarks(context, safe, dl.value)) mergedBm.add(safe)
+                    }
+                }
             } catch (e: Exception) {
                 ReadItLog.w("bookmarks sync failed: $safe -> ${e.message}")
                 failed.add(safe to (e.message ?: "error"))
             }
         }
-        for (f in listJson(context, BookmarkStore.dir(context))) {
+        for (f in listJson(BookmarkStore.dir(context))) {
             val safe = f.name.removeSuffix(SUFFIX)
             if (safe in remoteBookmarkIds) continue
             try {
@@ -142,7 +171,7 @@ class ProgressSync(private val client: WebDavClient) {
             }
         }
 
-        val report = Report(pulled, pushed, mergedBm, failed, System.currentTimeMillis() - started)
+        val report = Report(pulled, pushed, mergedBm, corrupt, failed, System.currentTimeMillis() - started)
         ReadItLog.i("progress sync done: ${report.summary()}")
         return report
     }
@@ -155,7 +184,7 @@ class ProgressSync(private val client: WebDavClient) {
         return displayName.removePrefix(prefix).removeSuffix(SUFFIX).takeIf { it.isNotEmpty() }
     }
 
-    private fun listJson(context: Context, dir: File): List<File> =
+    private fun listJson(dir: File): List<File> =
         dir.listFiles()?.filter { it.isFile && it.name.endsWith(SUFFIX) } ?: emptyList()
 
     private fun tmpFile(context: Context, name: String): File {
@@ -164,21 +193,65 @@ class ProgressSync(private val client: WebDavClient) {
         return File(dir, name)
     }
 
-    private fun downloadPosition(context: Context, r: WebDavClient.DavResource, safe: String): ReadingPosition? {
+    /**
+     * 远端侧车的读取结果。
+     *
+     * 必须区分 [Absent]（远端确实没这个文件）与 [Corrupt]（文件在，但 JSON 解析失败）。
+     * 原实现两者都返回 `null`，于是一条**损坏**的远端 JSON 被当成「远端什么都没有」，
+     * 随后无条件 PUT 把本地那份盖上去 —— 覆盖行为本身算「修复」没错，但用户完全
+     * 不知道远端曾经坏过、也不知道远端那份数据已经没了，日志里也看不出来。
+     * 这里显式区分并把损坏计入报告，让「远端数据丢失过」这件事对用户可见。
+     */
+    private sealed class Remote<out T> {
+        data class Value<T>(val value: T) : Remote<T>()
+        object Absent : Remote<Nothing>()
+        object Corrupt : Remote<Nothing>()
+    }
+
+    private fun downloadPosition(
+        context: Context,
+        r: WebDavClient.DavResource,
+        safe: String
+    ): Remote<ReadingPosition> {
         val tmp = tmpFile(context, "p_$safe")
         return try {
             client.download(r.href, tmp)
-            runCatching { gson.fromJson(tmp.readText(Charsets.UTF_8), ReadingPosition::class.java) }.getOrNull()
+            val text = tmp.readText(Charsets.UTF_8)
+            val parsed = runCatching { gson.fromJson(text, ReadingPosition::class.java) }.getOrNull()
+            if (parsed == null) {
+                ReadItLog.w("remote progress corrupt (will be overwritten by local): $safe")
+                Remote.Corrupt
+            } else {
+                Remote.Value(parsed)
+            }
+        } catch (e: java.io.IOException) {
+            // 下载本身失败：远端状态未知，不能当成「远端没有」而去覆盖它
+            ReadItLog.w("remote progress download failed, skip this round: $safe -> ${e.message}")
+            Remote.Absent
         } finally {
             tmp.delete()
         }
     }
 
-    private fun downloadBookmarks(context: Context, r: WebDavClient.DavResource, safe: String): BookmarkFile? {
+    private fun downloadBookmarks(
+        context: Context,
+        r: WebDavClient.DavResource,
+        safe: String
+    ): Remote<BookmarkFile> {
         val tmp = tmpFile(context, "b_$safe")
         return try {
             client.download(r.href, tmp)
-            runCatching { gson.fromJson(tmp.readText(Charsets.UTF_8), BookmarkFile::class.java) }.getOrNull()
+            val text = tmp.readText(Charsets.UTF_8)
+            val parsed = runCatching { gson.fromJson(text, BookmarkFile::class.java) }.getOrNull()
+            if (parsed == null) {
+                ReadItLog.w("remote bookmarks corrupt (will be overwritten by local): $safe")
+                Remote.Corrupt
+            } else {
+                Remote.Value(parsed)
+            }
+        } catch (e: java.io.IOException) {
+            ReadItLog.w("remote bookmarks download failed, skip this round: $safe -> ${e.message}")
+            Remote.Absent
         } finally {
             tmp.delete()
         }
@@ -211,8 +284,7 @@ class ProgressSync(private val client: WebDavClient) {
      * [remote] 为 null（远端还没有这本书的书签）时只做「本地上行」。
      * @return true 表示确实产生了变化（本地写盘或远端上传）
      */
-    private fun mergeBookmarks(context: Context, safe: String, remote: BookmarkFile?): Boolean {
-        val local = BookmarkStore.load(context, safe)
+    private fun mergeBookmarks(context: Context, safe: String, remote: BookmarkFile?): Boolean {        val local = BookmarkStore.load(context, safe)
         val merged = Bookmarks.merge(local, remote ?: BookmarkFile())
 
         val localBefore = gson.toJson(local)

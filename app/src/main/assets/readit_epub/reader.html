@@ -119,18 +119,34 @@
 
         /*
          * 字号规格化注入：themes.fontSize 只在 body 上给一个百分比，走的是继承链——
-         * 书内 CSS 若对 p/div 等直接声明了绝对 px 字号，子元素自己的声明永远压过继承，
-         * 字号就「调不动」。这里把正文常见文本选择器强制回继承链，根字号由 html 承担：
-         * html 收百分比，正文元素全部 inherit，一层缩放全局生效。
-         * h1~h6 / span 不在列表里：标题层级与小字号脚注标注保留作者原设定。
+         * 书内 CSS 若对 p/div/h1/span 直接声明了绝对 px 字号，子元素自己的声明永远压过继承，
+         * 字号就「调不动」。产品承诺是「字号四格式全生效」，所以这里必须把**所有**带
+         * font-size 声明的常见元素强制回继承链，根字号由 html 承担：html 收百分比，
+         * 正文元素全部 inherit，一层缩放全局生效。
+         *
+         * 标题不进 inherit，而是给一条**固定 em 阶梯**（h1 1.8em … h6 1em）：
+         *  - 全部 inherit 会把 h1~h6 压成与正文同大，作者靠字号表达的层级就没了；
+         *  - 保留书内的 px 又会让滑条对标题完全失效（这正是原来的问题）。
+         * em 相对父级、而父级已 inherit 自 html，所以阶梯随滑条一起缩放，层级也还在。
+         * 代价是对齐了标题尺寸：某本书刻意用 2.4em 的 h1，改成 1.8em。这是有意的取舍，
+         * 因为「滑条对标题无效」比「标题尺寸被归一」更伤。
+         *
          * 每章都是新 iframe 文档，rendered 事件里必须重放。
          */
+        var TEXT_SELECTORS = "body,div,p,li,dd,dt,blockquote,figcaption,td,th,span,a," +
+            "em,strong,b,i,u,s,small,pre,code,label,caption,figcaption";
+
         function applyFontSize() {
             if (!rendition) {
                 return;
             }
             var css = "html{font-size:" + fontPct + "% !important;}" +
-                "body,div,p,li,dd,dt,blockquote,figcaption,td,th{font-size:inherit !important;}";
+                TEXT_SELECTORS + "{font-size:inherit !important;}" +
+                "h1{font-size:1.8em !important;}" +
+                "h2{font-size:1.5em !important;}" +
+                "h3{font-size:1.3em !important;}" +
+                "h4{font-size:1.15em !important;}" +
+                "h5,h6{font-size:1em !important;}";
             var contents;
             try {
                 contents = rendition.getContents();
@@ -219,8 +235,17 @@
                     applyTheme();
                     hookRendition(rendition);
                     /* 0 为首个 linear spine 项；有进度时用 CFI */
-                    return rendition.display(startCfi ? startCfi : 0).catch(function (err) {
-                        fire("onError", ["display: " + (err && err.message ? err.message : err)]);
+                    var first = startCfi ? startCfi : 0;
+                    return rendition.display(first).catch(function (err) {
+                        /* 存档 CFI 失效（书被替换过、epub.js 改版、或偏移越界）时**不能就此白屏**：
+                           原来这里只 fire 一个 onError，页面永远留白，而且
+                           lastCfi 仍以存档值初始化、ProgressPolicy 又在 cfi 为空时才 Skip，
+                           于是坏 CFI 既不会被覆盖也不会被清除 —— 用户每次打开这本都是白屏，
+                           除非删书重导。回落第 0 章，并把 cfi 清空让上层重新落一个有效值。 */
+                        fire("onError", ["display(cfi) failed, fallback to start: " +
+                            (err && err.message ? err.message : err)]);
+                        window.ReadItEpub.forgetCfi();
+                        return rendition.display(0);
                     });
                 }).catch(function (err) {
                     fire("onError", ["open: " + (err && err.message ? err.message : err)]);
@@ -235,6 +260,23 @@
                 rendition.display(index).catch(function (e) {
                     fire("onError", ["jump: " + (e && e.message ? e.message : e)]);
                 });
+            },
+
+            /* 带 #fragment 的目录跳转：epub.js 走 Contents.locate，能定位到同一 XHTML 内的锚点 */
+            displayHref: function (href) {
+                if (!rendition || !href) {
+                    return;
+                }
+                renderStart = Date.now();
+                rendition.display(href).catch(function (e) {
+                    fire("onError", ["jumpHref: " + (e && e.message ? e.message : e)]);
+                });
+            },
+
+            /* 存档 CFI 已失效：通知 Kotlin 侧清掉，避免坏值一直被写回 */
+            forgetCfi: function () {
+                startCfi = "";
+                fire("onCfiInvalid", [""]);
             },
 
             displayCfi: function (cfi) {

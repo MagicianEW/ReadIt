@@ -3,7 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/readit_bg"
-    android:padding="12dp">
+    android:padding="@dimen/reader_padding">
 
     <LinearLayout
         android:layout_width="match_parent"

@@ -104,12 +104,31 @@ object ChapterDetector {
     }
 
     /**
+     * 章节检测的完整结果。
+     *
+     * [truncated] 用来暴露「章节数撞到上限被静默截断」。原实现只 `break` 掉，
+     * 调用方拿到一份**看起来完整**的目录：用户在目录里翻不到第 2001 章之后的内容，
+     * 也不知道那是上限而不是这本书真的就这么长 —— 一本 5000 章的网文后半本无法经目录抵达。
+     */
+    data class DetectResult(
+        val chapters: List<Chapter>,
+        val truncated: Boolean
+    )
+
+    /** 默认章节数上限。超过这个数量就停止检测并置 [DetectResult.truncated]。 */
+    const val DEFAULT_MAX_CHAPTERS = 2000
+
+    /** 兼容旧调用方：只要章节列表。截断信息用 [detectDetailed] 取。 */
+    fun detect(text: String, maxChapters: Int = DEFAULT_MAX_CHAPTERS): List<Chapter> =
+        detectDetailed(text, maxChapters).chapters
+
+    /**
      * @param text 全文
      * @param maxChapters 上限保护，避免超长文档产生巨量伪章节
-     * @return 章节列表（按 offset 升序）；无章节时返回空列表
+     * @return 章节列表（按 offset 升序）+ 是否被上限截断；无章节时列表为空
      */
-    fun detect(text: String, maxChapters: Int = 2000): List<Chapter> {
-        if (text.isEmpty()) return emptyList()
+    fun detectDetailed(text: String, maxChapters: Int = DEFAULT_MAX_CHAPTERS): DetectResult {
+        if (text.isEmpty()) return DetectResult(emptyList(), false)
         val out = ArrayList<Chapter>()
         var offset = 0
         var lineStart = 0
@@ -129,13 +148,22 @@ object ChapterDetector {
                         bodyOffset = bodyOffset
                     )
                 )
-                if (out.size >= maxChapters) break
+                if (out.size >= maxChapters) {
+                    // 后面确实还有内容才算「被截断」。
+                    //
+                    // 这里**不去**预判「后面还有没有标题」—— 那需要扫完剩下的全文，
+                    // 正是这个上限要避免的事。所以判据是「当前行之后还有没有字」。
+                    // 极端情况下（最后一个标题正好是第 maxChapters 个、且它就是全文末尾）
+                    // 会多提示一次；反过来漏提示的代价是用户翻遍目录都找不到后半本书，
+                    // 两者不对称，所以宁可多报。
+                    return DetectResult(out, len > lineEnd)
+                }
             }
             if (nl < 0) break
             offset = nl + 1
             lineStart = offset
         }
-        return out
+        return DetectResult(out, false)
     }
 
     /** 判断单行是否为标题 */

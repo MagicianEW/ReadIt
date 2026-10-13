@@ -34,7 +34,7 @@
             android:layout_height="wrap_content"
             android:background="@color/readit_bg"
             android:orientation="vertical"
-            android:padding="12dp"
+            android:padding="@dimen/reader_padding"
             android:visibility="gone">
 
             <!--
@@ -193,6 +193,7 @@
             android:background="@color/readit_divider" />
 
         <LinearLayout
+            android:id="@+id/barButtons"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"

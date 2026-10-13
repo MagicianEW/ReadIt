@@ -1,14 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 600x800 fallback baseline (see spec 5.4) -->
-    <dimen name="toolbar_icon_size">36dp</dimen>
-    <dimen name="toolbar_icon_size_large">40dp</dimen>
-    <dimen name="touch_target_min">48dp</dimen>
-    <dimen name="touch_target_min_large">56dp</dimen>
-    <dimen name="reader_padding">12dp</dimen>
-    <dimen name="text_size_min">10sp</dimen>
-    <dimen name="text_size_default">14sp</dimen>
-    <dimen name="text_size_max">20sp</dimen>
+    <!--
+      COMPACT 档（sw < 400dp），也是 600x800 兜底基准（见规范 §5.4 / §9.2）。
 
-    <!-- >=758px enhancement resource qualifier: values-sw600dp -->
+      这里只保留**确实被布局引用**的键。曾经还有 6 个零引用的键，一并说明去向：
+
+      - touch_target_min_large / toolbar_icon_size_large：与 touch_target_min / toolbar_icon_size
+        同义重复，分档已由资源限定符本身完成，保留两套名字只会让人不知道该用哪个。
+        已删除。
+      - toolbar_icon_size：全项目布局**没有图标位**（工具栏、目录、书架全是文字按钮/文字菜单），
+        没有可挂载的地方。留着它等于对外宣称「图标按档位缩放」，而实际不存在图标。
+        已删除。若将来引入图标控件，这里是接回去的地方。
+      - text_size_min / text_size_default / text_size_max：正文字号是**用户偏好**，
+        边界由 Fonts.MIN_FONT_SP / MAX_FONT_SP / DEFAULT_SIZE_SP 单点定义
+        （纯常量，JVM 可测），滑动条与 clamp 共用同一套值。dimens 再抄一份就会与
+        Preferences 里的 slider min/max 各走各的 —— 三桶写的 10/11/12sp 与实际 10sp
+        下限的矛盾正是这么来的。已删除。
+    -->
+    <dimen name="touch_target_min">48dp</dimen>
+    <dimen name="reader_padding">12dp</dimen>
 </resources>

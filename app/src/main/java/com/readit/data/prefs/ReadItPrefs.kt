@@ -40,6 +40,19 @@ class ReadItPrefs(private val sp: SharedPreferences) {
         private const val K_SYNC_AUTO = "sync_auto"
         private const val K_INVERT = "invert"
 
+        /**
+         * 「用户显式设置过」的独立标记键（设备属性的三件套：档位 / 刷新 / 渲染）。
+         *
+         * 为什么不直接用 `sp.contains(值键)` 当判据：配置恢复自身也会写值键，
+         * 一旦拿 `contains` 当「显式设置过」，**恢复一次就把守卫永久烧掉**——
+         * 此后从任何设备导入档位/刷新/渲染全被拒，正是 DeviceScopedConfig
+         * 文档开头要防的「慢机档位盖到快机上」事故，只是推迟到第二次。
+         * 值键与「用户设置过」标记必须是两件事，故另立键。
+         */
+        private const val K_USER_SET_PERF_TIER = "user_set_perf_tier"
+        private const val K_USER_SET_REFRESH_MODE = "user_set_refresh_mode"
+        private const val K_USER_SET_RENDER_MODE = "user_set_render_mode"
+
         /** 屏幕灯默认开着；默认亮度 50% */
         const val DEFAULT_LIGHT_ON = true
         const val DEFAULT_LIGHT_LEVEL = 50
@@ -71,22 +84,38 @@ class ReadItPrefs(private val sp: SharedPreferences) {
 
     var perfTier: PerfTier
         get() = PerfTier.from(sp.getString(K_PERF_TIER, PerfTier.AUTO.key))
-        set(v) = sp.edit().putString(K_PERF_TIER, v.key).apply()
+        set(v) {
+            sp.edit().putString(K_PERF_TIER, v.key).putBoolean(K_USER_SET_PERF_TIER, true).apply()
+        }
 
     /**
-     * 用户是否**显式设置过**性能档位（判据是键存在，不是「值 != AUTO」）。
+     * 用户是否**显式设置过**性能档位。
      *
-     * 只看键：主动选「自动」也是一次显式决策，不该被配置恢复当成「没设过」而顶掉。
+     * 判据是独立的 [K_USER_SET_PERF_TIER] 标记，不是值键是否存在：
+     * 主动选「自动」也算一次显式决策，不该被配置恢复当成「没设过」而顶掉；
+     * 而配置恢复自己写入的值**不算**显式决策（走 [setPerfTierFromRestore]）。
      * 供 [com.readit.data.backup.DeviceScopedConfig] 在恢复配置时决定是否保留本机值。
      */
-    val hasExplicitPerfTier: Boolean get() = sp.contains(K_PERF_TIER)
+    val hasExplicitPerfTier: Boolean get() = sp.getBoolean(K_USER_SET_PERF_TIER, false)
+
+    /** 配置恢复专用：写值但**不**标记为「用户显式设置」，避免把设备属性守卫一次烧掉 */
+    fun setPerfTierFromRestore(v: PerfTier) {
+        sp.edit().putString(K_PERF_TIER, v.key).apply()
+    }
 
     var refreshMode: RefreshMode
         get() = RefreshMode.from(sp.getString(K_REFRESH_MODE, RefreshMode.AUTO.key))
-        set(v) = sp.edit().putString(K_REFRESH_MODE, v.key).apply()
+        set(v) {
+            sp.edit().putString(K_REFRESH_MODE, v.key).putBoolean(K_USER_SET_REFRESH_MODE, true).apply()
+        }
 
     /** 同 [hasExplicitPerfTier]，作用于刷新模式 */
-    val hasExplicitRefreshMode: Boolean get() = sp.contains(K_REFRESH_MODE)
+    val hasExplicitRefreshMode: Boolean get() = sp.getBoolean(K_USER_SET_REFRESH_MODE, false)
+
+    /** 配置恢复专用：不标记显式设置（见 [setPerfTierFromRestore]） */
+    fun setRefreshModeFromRestore(v: RefreshMode) {
+        sp.edit().putString(K_REFRESH_MODE, v.key).apply()
+    }
 
     /**
      * 文字渲染模式（[RenderMode]）：平滑（抗锯齿）/ 锐利（点对点）。
@@ -96,7 +125,9 @@ class ReadItPrefs(private val sp: SharedPreferences) {
      */
     var renderMode: RenderMode
         get() = RenderMode.from(sp.getString(K_RENDER_MODE, RenderMode.AUTO.key))
-        set(v) = sp.edit().putString(K_RENDER_MODE, v.key).apply()
+        set(v) {
+            sp.edit().putString(K_RENDER_MODE, v.key).putBoolean(K_USER_SET_RENDER_MODE, true).apply()
+        }
 
     /**
      * 同 [hasExplicitPerfTier]，作用于渲染模式。
@@ -104,7 +135,12 @@ class ReadItPrefs(private val sp: SharedPreferences) {
      * 渲染模式也是**设备属性**（墨水屏该锐利、LCD 该平滑），
      * 所以跨设备恢复配置时同样只在「本机没显式选过」时才接受备份值。
      */
-    val hasExplicitRenderMode: Boolean get() = sp.contains(K_RENDER_MODE)
+    val hasExplicitRenderMode: Boolean get() = sp.getBoolean(K_USER_SET_RENDER_MODE, false)
+
+    /** 配置恢复专用：不标记显式设置（见 [setPerfTierFromRestore]） */
+    fun setRenderModeFromRestore(v: RenderMode) {
+        sp.edit().putString(K_RENDER_MODE, v.key).apply()
+    }
 
     var fontSizeSp: Float
         get() = com.readit.core.text.Fonts.clampFontSizeSp(sp.getFloat(K_FONT_SIZE_SP, DEFAULT_FONT_SIZE_SP))
@@ -121,13 +157,22 @@ class ReadItPrefs(private val sp: SharedPreferences) {
             ?: DEFAULT_FONT_FAMILY
         set(v) = sp.edit().putString(K_FONT_FAMILY, v).apply()
 
+    /**
+     * 行距倍数。读写两侧都 clamp（与 [fontSizeSp] 同一纪律）——
+     * 越界值只能来自配置备份 / 跨设备恢复 / 系统 prefs 还原，而 `TxtCanvasView.onDraw`
+     * 拿到 `<= 0` 或 `NaN` 的行距会叠字或整页空白。
+     */
     var lineSpacing: Float
-        get() = sp.getFloat(K_LINE_SPACING, DEFAULT_LINE_SPACING)
-        set(v) = sp.edit().putFloat(K_LINE_SPACING, v).apply()
+        get() = com.readit.core.text.Fonts.clampLineSpacing(sp.getFloat(K_LINE_SPACING, DEFAULT_LINE_SPACING))
+        set(v) = sp.edit().putFloat(K_LINE_SPACING, com.readit.core.text.Fonts.clampLineSpacing(v)).apply()
 
+    /**
+     * 页边距（dp）。同样双向 clamp：`marginDp` 越界会让
+     * `TxtCanvasView` 的可用宽度算出非正数，`Paint.breakText` 返回 0 而绘制循环不推进。
+     */
     var marginDp: Int
-        get() = sp.getInt(K_MARGIN_DP, DEFAULT_MARGIN_DP)
-        set(v) = sp.edit().putInt(K_MARGIN_DP, v).apply()
+        get() = com.readit.core.text.Fonts.clampMarginDp(sp.getInt(K_MARGIN_DP, DEFAULT_MARGIN_DP))
+        set(v) = sp.edit().putInt(K_MARGIN_DP, com.readit.core.text.Fonts.clampMarginDp(v)).apply()
 
     /**
      * 反色（黑白置换，F27）。默认关。

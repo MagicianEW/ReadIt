@@ -177,7 +177,35 @@ class TxtCanvasView @JvmOverloads constructor(
 
     fun currentPage(): Int = pageIndex
 
-    fun totalPages(): Int = pager?.exactPageCount() ?: 1
+    /**
+     * 用户正拖着排版滑条（字号 / 行距 / 边距）。
+     *
+     * 拖动过程中 `rebuild()` 每一格都会跑一次，而 rebuild 末尾的 [notifyPageChanged]
+     * 要拿总页数去刷页码 —— [totalPages] 走的是 [TxtPager.exactPageCount]，
+     * 那是一次**全书**分页。1000 万字的书单次几百毫秒，拖动过程就是整机冻结。
+     *
+     * 所以拖动期间改用 [TxtPager.estimatedPageCount]（O(1)，按容量折算）：
+     * 总页数在拖动中显示的是估算值，松手后 [endInteractiveReflow] 立刻补一次精确值，
+     * 页码会从「约 312 页」跳到「318 页」——这是一次可见的收敛，好过拖不动。
+     */
+    private var interactiveReflow = false
+
+    /** 滑条按下：进入估算模式 */
+    fun beginInteractiveReflow() {
+        interactiveReflow = true
+    }
+
+    /** 滑条松手：回到精确模式，并立刻把真实总页数刷到 UI 上（只精确分页这一次） */
+    fun endInteractiveReflow() {
+        if (!interactiveReflow) return
+        interactiveReflow = false
+        notifyPageChanged()
+    }
+
+    fun totalPages(): Int {
+        val p = pager ?: return 1
+        return if (interactiveReflow) p.estimatedPageCount() else p.exactPageCount()
+    }
 
     /**
      * 取某偏移处的一小段正文，用于书签标签（F25）。
@@ -233,18 +261,30 @@ class TxtCanvasView @JvmOverloads constructor(
         rebuild()
     }
 
+    /**
+     * 行高（分页与绘制**唯一**的口径）。
+     *
+     * 必须用 ascent/descent（hhea，稳定在 1em 上下），不能用 `fm.top/bottom`：后者来自 OS/2，
+     * CJK 字体为容纳全角/竖排字形会给到 3em 以上 —— 换上内置思源宋体后实测行高被算成 ~120px，
+     * 一页只剩 2 行。
+     *
+     * `.coerceIn(textSize, textSize*3)` 同样不能只出现在一处：以前 [rebuild] 带钳位、
+     * [onDraw] 不带，于是用户字体（hhea 跨度 > 1.5em 常见）把行距拉满时，
+     * 分页按 3em 算行数、绘制按真实值（更大）画，可用行数变少，超出 `bottomLimit` 的行
+     * 被 break 掉 —— 那些字符**既不在本页也不在任何后续页**（下一页从 pager 算出的字符
+     * 边界开始，已越过它们），即静默丢字。抽成一处，两个口径不可能再漂移。
+     */
+    private fun lineHeightPx(fm: Paint.FontMetrics): Float =
+        ((fm.descent - fm.ascent) * lineSpacing)
+            .coerceIn(paint.textSize, paint.textSize * 3f)
+            .let { if (it.isNaN() || it <= 0f) paint.textSize else it }
+
     private fun rebuild() {
         if (width <= 0 || height <= 0) return
         val density = resources.displayMetrics.density
         val marginPx = marginDp * density
-        val maxWidth = (width - 2 * marginPx).coerceAtLeast(density * 40)
-        val fm = paint.fontMetrics
-        // 行高必须用 ascent/descent（hhea，稳定在 1em 上下），不能用 fm.top/bottom：
-        // 后者来自 OS/2，CJK 字体为了容纳全角/竖排字形会给到 3em 以上 —— 换上内置思源宋体后
-        // 实测行高被算成 ~120px，一页只剩 2 行。这里与 onDraw() 的行距口径也统一了
-        // （以前两处公式不同，分页和绘制会算出不同的行高）。
-        val lineHeight = ((fm.descent - fm.ascent) * lineSpacing)
-            .coerceIn(paint.textSize, paint.textSize * 3f)
+        val maxWidth = contentWidthPx(density)
+        val lineHeight = lineHeightPx(paint.fontMetrics)
         val usable = (height - 2 * marginPx).coerceAtLeast(lineHeight)
 
         // 中文字符宽度作为基准（中英混排时偏保守，避免溢出）。
@@ -293,9 +333,9 @@ class TxtCanvasView @JvmOverloads constructor(
         // 字形仍会跨在两个像素之间 —— 半像素偏移是抗锯齿之外第二个发虚来源。
         val marginPx = if (sharp) kotlin.math.round(marginDp * density) else marginDp * density
         val fm = paint.fontMetrics
-        val lineHeight = (fm.descent - fm.ascent) * lineSpacing
+        val lineHeight = lineHeightPx(fm)
         var y = marginPx - fm.ascent
-        val maxWidth = width - 2 * marginPx
+        val maxWidth = contentWidthPx(density)
         val bottomLimit = height - marginPx
 
         for (para in page.text.split('\n')) {
@@ -308,6 +348,10 @@ class TxtCanvasView @JvmOverloads constructor(
             while (start < para.length) {
                 if (y > bottomLimit) break
                 val count = paint.breakText(para, start, para.length, true, maxWidth, null)
+                // count <= 0 时 end == start，`start = end` 不推进 → 这个 while 永远出不来，
+                // 主线程 100% 卡死。maxWidth 已有下限保护，这里再加一道保险：
+                // 宁可少画一个字符，也不能让整页画不完。
+                if (count <= 0) break
                 val end = (start + count).coerceAtMost(para.length)
                 canvas.drawText(para, start, end, marginPx, if (sharp) kotlin.math.round(y) else y, paint)
                 y += lineHeight
@@ -315,6 +359,16 @@ class TxtCanvasView @JvmOverloads constructor(
             }
         }
     }
+
+    /**
+     * 正文可用宽度，**带下限**。
+     *
+     * `width - 2*marginPx` 在 `marginDp` 越界时（配置备份/恢复可写入任意值；读取侧原先
+     * 无 clamp）会 <= 0，而 `Paint.breakText` 传非正宽度会返回 0 —— 于是分页与绘制双双空转。
+     * 下限与最小可用正文宽度一致，窄屏/分屏压缩 width 时也不会踩到。
+     */
+    private fun contentWidthPx(density: Float): Float =
+        (width - 2 * marginDp * density).coerceAtLeast(density * 40f)
 
     private fun notifyPageChanged() {
         onPageChanged?.invoke(pageIndex, totalPages())

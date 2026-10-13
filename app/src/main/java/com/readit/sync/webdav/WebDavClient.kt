@@ -12,6 +12,7 @@ import org.xmlpull.v1.XmlPullParser
 import java.io.File
 import java.io.IOException
 import java.security.KeyStore
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
@@ -34,6 +35,10 @@ class WebDavClient(
     companion object {
         const val USER_AGENT = "ReadIt-Sync-Agent/1.0"
         private const val NS_DAV = "DAV:"
+
+        /** 与 [com.readit.data.storage.StorageManager.TMP_PREFIX] 同源，避免书库里留下野文件 */
+        private val TMP_PREFIX = com.readit.data.storage.StorageManager.TMP_PREFIX
+        private const val TMP_SUFFIX = ".part"
     }
 
     /** 规范化后的服务器根地址（无尾斜杠） */
@@ -133,23 +138,41 @@ class WebDavClient(
             }
             if (!resp.isSuccessful) throw IOException("GET ${resp.code()} on $url")
             val body = resp.body() ?: throw IOException("empty body")
-            val tmp = File(dest.parentFile, dest.name + ".part")
-            var size = 0L
-            body.byteStream().use { input ->
-                tmp.outputStream().buffered().use { out ->
-                    val buf = ByteArray(64 * 1024)
-                    while (true) {
-                        val n = input.read(buf)
-                        if (n <= 0) break
-                        out.write(buf, 0, n)
-                        size += n
+            // 临时文件名必须（a）唯一、（b）带 TMP_PREFIX。
+            // 原来固定用 "<name>.part" 且不带前缀，后果有两个：
+            //  1. 前缀不符 → StorageManager.listBooks 只按 TMP_PREFIX 过滤，中断的下载会
+            //     在书架留下一本打不开的 "x.txt.part"，还会被下一轮同步当成本地独有书上传到 NAS；
+            //  2. 名字固定 → 手动同步与 6 小时周期任务并发时，两条线程各自截断同一个
+            //     临时文件并交替写入，最终落到书架上的是两段内容拼接的**损坏书籍文件**。
+            val tmp = File(
+                dest.parentFile,
+                TMP_PREFIX + UUID.randomUUID().toString() + "_" + dest.name + TMP_SUFFIX
+            )
+            try {
+                var size = 0L
+                body.byteStream().use { input ->
+                    tmp.outputStream().buffered().use { out ->
+                        val buf = ByteArray(64 * 1024)
+                        while (true) {
+                            val n = input.read(buf)
+                            if (n <= 0) break
+                            out.write(buf, 0, n)
+                            size += n
+                        }
                     }
                 }
+                // 同一卷上的 rename 覆盖本身就是原子的，**不先删** dest。
+                // 先删的话 rename 一旦失败，用户丢的是「书架上原本那本书 + 它的同步基线」，
+                // 只剩一个 .readit_tmp_ 残留 —— 而 StorageManager.importAtomic 早就因为
+                // 同样的理由刻意不先删了，download 这条路径没跟上。
+                if (!tmp.renameTo(dest)) throw IOException("rename failed: ${tmp.name}")
+                ReadItLog.i("WebDAV download ok: ${dest.name} (${size}B)")
+                return DownloadResult(dest, resp.header("ETag"), resp.header("Last-Modified"), size)
+            } catch (e: Throwable) {
+                // 失败时清掉半截临时文件，否则它会留在书库里（purgeTemp 只在启动时兜底）
+                runCatching { if (tmp.exists()) tmp.delete() }
+                throw e
             }
-            if (dest.exists() && !dest.delete()) ReadItLog.w("cannot delete old: ${dest.name}")
-            if (!tmp.renameTo(dest)) throw IOException("rename failed: ${tmp.name}")
-            ReadItLog.i("WebDAV download ok: ${dest.name} (${size}B)")
-            return DownloadResult(dest, resp.header("ETag"), resp.header("Last-Modified"), size)
         }
     }
 
@@ -215,7 +238,8 @@ class WebDavClient(
         name: String,
         file: File,
         remoteEtag: String? = null,
-        createOnly: Boolean = remoteEtag.isNullOrEmpty()
+        createOnly: Boolean = remoteEtag.isNullOrEmpty(),
+        remoteLastModified: String? = null
     ): UploadResult {
         if (!file.exists()) throw IOException("upload source missing: ${file.name}")
         val url = urlOf(name)
@@ -226,6 +250,14 @@ class WebDavClient(
         val builder = Request.Builder().url(url).put(body)
         when {
             !remoteEtag.isNullOrEmpty() -> builder.header("If-Match", quoteEtag(remoteEtag))
+            // 有基线但服务端不给 ETag：这是「更新既有远端文件」，**不能**退化成 createOnly。
+            // 原实现只看 ETag，createOnly 由 `remoteEtag.isNullOrEmpty()` 推出，于是发
+            // `If-None-Match: *` 打到已存在的文件上 → 合规服务端 412 → 被上层记成「失败」
+            // 而非「冲突」，每轮重复失败且用户无从判断；不认该头的服务端则直接覆盖。
+            // 用 HTTP 的 If-Unmodified-Since 把「远端自基线以来没被改过」这个条件补上，
+            // 判定层用 Last-Modified 兜底的承诺才真正落在写入层。
+            remoteLastModified != null ->
+                builder.header("If-Unmodified-Since", remoteLastModified)
             createOnly -> builder.header("If-None-Match", "*")
         }
 
@@ -267,9 +299,10 @@ class WebDavClient(
         val sslContext = SSLContext.getInstance("TLS")
         sslContext.init(null, arrayOf(trustManager), null)
 
-        val spec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS)
-            .tlsVersions(okhttp3.TlsVersion.TLS_1_2)
-            .build()
+        // MODERN_TLS 自带 TLS 1.2/1.3，**不要**再 .tlsVersions(TLS_1_2) 收窄：
+        // 需求要的「API 19 补 TLS 1.2」由 Tls12SocketFactory 按 SDK 分档处理，
+        // 在这里钉死 1.2 会让只留 1.3 的服务端在所有 API 上都连不上。
+        val spec = ConnectionSpec.Builder(ConnectionSpec.MODERN_TLS).build()
 
         return OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)

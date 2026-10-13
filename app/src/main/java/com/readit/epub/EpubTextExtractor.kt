@@ -3,6 +3,7 @@ package com.readit.epub
 import android.util.Xml
 import com.readit.core.util.ReadItLog
 import org.xmlpull.v1.XmlPullParser
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.io.StringReader
@@ -51,6 +52,10 @@ class EpubTextExtractor {
         val warnings = ArrayList<String>()
         val sb = StringBuilder()
         val spineOffsets = IntArray(book.spine.size) { -1 }
+        // 每章首行（去空白后的锚点），用于事后把偏移**重算**到最终文本上。
+        // 原因见下面 realignOffsets 的注释。
+        val anchors = arrayOfNulls<String>(book.spine.size)
+        var totalChars = 0
 
         val zip = ZipFile(file)
         try {
@@ -62,32 +67,81 @@ class EpubTextExtractor {
                 spineOffsets[index] = sb.length
                 val text = runCatching {
                     val stream = EpubParser.open(zip, item.href.substringBefore('#'))
-                    stream.use { toPlainText(readAll(it), warnings) }
+                    stream.use { toPlainText(readAll(it, index, warnings), warnings) }
                 }.getOrElse {
                     warnings.add("spine[$index] read failed -> ${it.message}")
                     ""
                 }
                 if (text.isBlank()) {
                     warnings.add("spine[$index] empty: ${item.href}")
+                } else {
+                    anchors[index] = text.lineSequence().firstOrNull { it.isNotBlank() }?.trim()
+                        ?.takeIf { it.isNotEmpty() }
                 }
                 sb.append(text)
                 if (!text.endsWith('\n')) sb.append('\n')
+
+                // 总量护栏：EPUB 侧没有 DOCX 那套进程隔离兜底，zip bomb 或超大书
+                // 会在阅读器自身进程把堆吃穿。超了就停，并把已抽到的部分交出去
+                // （有内容总比 OOM 崩掉好），同时如实告知截断。
+                totalChars += text.length
+                if (totalChars >= MAX_TOTAL_CHARS) {
+                    warnings.add("正文超过 ${MAX_TOTAL_CHARS} 字符，已截断（后续章节未载入）")
+                    return@forEachIndexed
+                }
             }
         } finally {
             runCatching { zip.close() }
         }
+
+        val text = collapseBlankLines(sb.toString()).trim()
+        realignOffsets(spineOffsets, anchors, text, warnings)
 
         val tocOffsets = IntArray(book.toc.size) { i ->
             val e = book.toc[i]
             if (e.spineIndex in spineOffsets.indices) spineOffsets[e.spineIndex] else -1
         }
 
-        val text = collapseBlankLines(sb.toString()).trim()
         ReadItLog.i(
             "epub text extracted: chars=${text.length} spine=${book.spine.size} " +
                 "toc=${book.toc.size} warnings=${warnings.size}"
         )
         return Result(text, spineOffsets, tocOffsets, warnings.distinct())
+    }
+
+    /**
+     * 把每章的字符偏移**重算**到最终文本上。
+     *
+     * 原实现在累积缓冲上记 `spineOffsets[index] = sb.length`，最后却拿
+     * `collapseBlankLines(...).trim()` 之后的新串去渲染 —— 中间被折叠掉的空行和
+     * 开头的 `trim()` 让偏移随章节推进**单调漂移**，于是目录跳转越到后面越不准
+     * （走正则兜底的书从第一章就开始偏，因为标签替换后开头必有空白）。
+     * 现有测试只断言「偏移单调递增」，那是恒真的，测不出这个分歧。
+     *
+     * 做法：记下每章首行作为锚点，在最终文本里从上一章的位置往后找。
+     * `collapseBlankLines` 只压缩连续换行、`trim()` 只动首尾空白，都不会删掉非空行，
+     * 所以锚点必然还能定位到。
+     */
+    private fun realignOffsets(
+        spineOffsets: IntArray,
+        anchors: Array<String?>,
+        finalText: String,
+        warnings: MutableList<String>
+    ) {
+        var cursor = 0
+        for (i in anchors.indices) {
+            val anchor = anchors[i] ?: continue
+            val at = finalText.indexOf(anchor, cursor)
+            if (at >= 0) {
+                spineOffsets[i] = at
+                cursor = at
+            } else {
+                // 锚点找不到（极端的空白折叠）：保守地标 -1，让调用方 filter 掉这条目录项，
+                // 好过给一个指到别的章节的偏移
+                spineOffsets[i] = -1
+                warnings.add("spine[$i] anchor not found after normalisation -> 目录项已略过")
+            }
+        }
     }
 
     // ------------------------------------------------------------------ XHTML → 纯文本
@@ -202,8 +256,35 @@ class EpubTextExtractor {
         return out.toString()
     }
 
-    private fun readAll(input: InputStream): String {
-        val bytes = input.readBytes()
+    /**
+     * 读一个章节的 XHTML，**带体积上限**。
+     *
+     * 原实现是 `input.readBytes()`：无上限。单章解压出来几百 MB 的 zip bomb，
+     * 或者一本几十万字的书，都会在阅读器自身进程 OOM —— EPUB 侧没有 DOCX 的
+     * `:converter` 进程隔离兜底，这是降级路径独有的暴露面。
+     * 超限时截断并如实告警（书仍能读，只是这一章没读完）。
+     */
+    private fun readAll(input: InputStream, index: Int, warnings: MutableList<String>): String {
+        val out = ByteArrayOutputStream()
+        val buf = ByteArray(64 * 1024)
+        var total = 0
+        var truncated = false
+        while (true) {
+            val n = input.read(buf)
+            if (n <= 0) break
+            if (total + n > MAX_CHAPTER_BYTES) {
+                out.write(buf, 0, MAX_CHAPTER_BYTES - total)
+                total = MAX_CHAPTER_BYTES
+                truncated = true
+                break
+            }
+            out.write(buf, 0, n)
+            total += n
+        }
+        if (truncated) {
+            warnings.add("spine[$index] 超过 ${MAX_CHAPTER_BYTES / 1024}KB，已截断")
+        }
+        val bytes = out.toByteArray()
         return String(bytes, charsetOf(bytes))
     }
 
@@ -228,6 +309,12 @@ class EpubTextExtractor {
     }
 
     private companion object {
+        /** 单章 XHTML 的字节上限（8MB）：超出即截断，防 zip bomb / 超大章节 */
+        const val MAX_CHAPTER_BYTES = 8 * 1024 * 1024
+
+        /** 全书正文字符上限（400 万，够 200 万字的书还有余量）：与 PDF 文本档同一量级 */
+        const val MAX_TOTAL_CHARS = 4_000_000
+
         val SKIP_TAGS = setOf("script", "style", "head")
         val BLOCK_TAGS = setOf(
             "p", "div", "h1", "h2", "h3", "h4", "h5", "h6",

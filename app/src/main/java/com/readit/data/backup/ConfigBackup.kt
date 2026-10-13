@@ -130,18 +130,20 @@ object ConfigBackup {
         if (DeviceScopedConfig.keepLocal(DeviceScopedConfig.KEY_PERF_TIER, prefs.hasExplicitPerfTier)) {
             ReadItLog.i("config restore: 本机已显式设置档位 ${prefs.perfTier.key}，忽略备份里的 ${s.perfTier}")
         } else {
-            prefs.perfTier = PerfTier.from(s.perfTier)
+            // 必须走 FromRestore 而非普通 setter：普通 setter 会打上「用户显式设置」标记，
+            // 于是「恢复一次」就把自己变成了「显式设置过」，第二次起所有设备属性导入全被拒。
+            prefs.setPerfTierFromRestore(PerfTier.from(s.perfTier))
         }
         if (DeviceScopedConfig.keepLocal(DeviceScopedConfig.KEY_REFRESH_MODE, prefs.hasExplicitRefreshMode)) {
             ReadItLog.i("config restore: 本机已显式设置刷新模式 ${prefs.refreshMode.key}，忽略备份里的 ${s.refreshMode}")
         } else {
-            prefs.refreshMode = RefreshMode.from(s.refreshMode)
+            prefs.setRefreshModeFromRestore(RefreshMode.from(s.refreshMode))
         }
         // 渲染模式同理：墨水屏的「锐利」搬到 LCD 上会满屏锯齿，反之会发虚。
         if (DeviceScopedConfig.keepLocal(DeviceScopedConfig.KEY_RENDER_MODE, prefs.hasExplicitRenderMode)) {
             ReadItLog.i("config restore: 本机已显式设置渲染模式 ${prefs.renderMode.key}，忽略备份里的 ${s.renderMode}")
         } else {
-            prefs.renderMode = RenderMode.from(s.renderMode)
+            prefs.setRenderModeFromRestore(RenderMode.from(s.renderMode))
         }
 
         prefs.fontSizeSp = s.fontSizeSp
@@ -166,10 +168,16 @@ object ConfigBackup {
             prefs.booksDir = ""
         } else {
             val dir = File(s.booksDir)
-            if (dir.isDirectory) {
+            // 存在**且非空**才算数。原来只查 isDirectory，于是「目标机上恰好有个同名空目录」
+            // （换机残留、外置卡挂载点、或两台机器路径相同而内容不同）就会被接受 ——
+            // 而 listBooks 只列这个目录，用户回到书架看到的是**空书架**，书还躺在旧目录里。
+            // 上一行注释声称要防的正是这个场景，可当时的判据根本防不住。
+            if (dir.isDirectory && dir.listFiles()?.isNotEmpty() == true) {
                 prefs.booksDir = dir.absolutePath
             } else {
-                ReadItLog.w("config restore: booksDir 不存在或不是目录，保留本机现值: ${s.booksDir}")
+                ReadItLog.w(
+                    "config restore: booksDir 不存在 / 不是目录 / 为空，保留本机现值: ${s.booksDir}"
+                )
             }
         }
 

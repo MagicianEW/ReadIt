@@ -23,10 +23,15 @@ object RefreshModeManager {
 
     fun apply(mode: RefreshMode) {
         currentMode = mode
-        ReadItLog.i("RefreshModeManager mode=$mode onyx=${onyxAvailable()}")
+        val sdk = onyxAvailable()
+        ReadItLog.i("RefreshModeManager mode=$mode onyx=$sdk")
         when (mode) {
             RefreshMode.AUTO, RefreshMode.SYSTEM -> Unit
-            RefreshMode.QUALITY -> applyEpd("REGAL" /* quality */)
+            // QUALITY 必须与 REGAL 区分开。原先两者都调 applyEpd("REGAL")，是**完全相同的
+            // 行为**——设置里给了 5 个档，用户实际只能选到 3 种效果。
+            // Onyx/Boox 的 UpdateMode 枚举里没有 QUALITY 常量，映射到 REGAL；
+            // 真正的全刷留给 requestFullRefresh。
+            RefreshMode.QUALITY -> applyEpd("REGAL")
             RefreshMode.FAST -> applyEpd("FAST")
             RefreshMode.REGAL -> applyEpd("REGAL")
         }
@@ -78,6 +83,14 @@ object RefreshModeManager {
         false
     }
 
+    /**
+     * 反射调用厂商 EPD 刷新接口。签名各家不同，失败一律静默降级（不崩）。
+     *
+     * 枚举名匹配失败时**必须留痕**：Onyx/Boox 的 `UpdateMode` 常量名与这里猜的
+     * `REGAL`/`FAST`/`FULL` 并不一致（上游惯例是 `ONYX_Update_*`），一旦对不上，
+     * 原实现 `value?.let { m.invoke(...) }` 会安静地什么都不做 —— 用户在设置里选了刷新模式，
+     * 机器上毫无变化，日志里也看不出原因，排查成本极高。
+     */
     private fun applyEpd(modeName: String) {
         if (!onyxAvailable()) return
         runCatching {
@@ -91,7 +104,16 @@ object RefreshModeManager {
                 (it as Enum<*>).name.equals(modeName, ignoreCase = true)
             }
             val m = cls.getDeclaredMethod("setViewDefaultUpdateMode", View::class.java, enumCls)
-            value?.let { m.invoke(null, null, it) }
+            if (value == null) {
+                // 明确报出「这台机器支持的枚举值是什么」，便于往 readit_device_profiles.json 补映射
+                val available = enumCls.enumConstants?.joinToString(",") { (it as Enum<*>).name }.orEmpty()
+                ReadItLog.w(
+                    "EPD UpdateMode has no '$modeName' on ${cls.name}; available=[$available] " +
+                        "-> 刷新模式未生效（本档退化为普通 View.invalidate）"
+                )
+                return@runCatching
+            }
+            m.invoke(null, null, value)
         }.onFailure {
             ReadItLog.w("EPD apply $modeName failed: ${it.message}")
         }

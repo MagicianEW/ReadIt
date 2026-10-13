@@ -23,8 +23,16 @@ import java.io.IOException
 object StorageManager {
 
     private const val BOOKS_DIR = "books"
-    private const val TMP_PREFIX = ".readit_tmp_"
     private const val BUFFER = 64 * 1024
+
+    /**
+     * 书籍目录里「临时文件」的前缀。
+     *
+     * 公开出来给 [com.readit.sync.webdav.WebDavClient] 复用：下载也往书库里写临时文件，
+     * 两边**必须**用同一个前缀，否则中断的下载会在书架留下一本打不开的 `x.part`
+     * （listBooks 只按本前缀过滤）并被下一轮同步上传到 NAS。
+     */
+    const val TMP_PREFIX = ".readit_tmp_"
 
     /** 应用内部默认书籍目录（无自定义配置时的兜底，也是迁移的「源」）。 */
     fun defaultBooksDir(context: Context): File {

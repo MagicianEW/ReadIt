@@ -91,6 +91,21 @@ object Bookmarks {
     private fun order(bm: Bookmark): Int = if (bm.pageIndex >= 0) bm.pageIndex else bm.charOffset
 
     /**
+     * 统一的超限裁剪：**按加入时间（`createdAt`）丢最老的**。
+     *
+     * 抽出来是因为 [add] 与 [merge] 各写了一份裁剪，而两份曾经按不同键排：
+     * merge 那份先按阅读位置排序再取尾部，于是「另一台设备刚加在书首的书签」会被丢，
+     * 再随合并结果推回云端 → 书签在两端同时消失。规则只留这一处，杜绝再次漂移。
+     *
+     * 返回的是**未按阅读位置排序**的集合，排序是调用方的事（顺序见 [sorted]）。
+     */
+    private fun trim(items: List<Bookmark>): List<Bookmark> {
+        if (items.size <= MAX_PER_BOOK) return items
+        val byAge = items.sortedWith(compareBy({ it.createdAt }, { order(it) }))
+        return byAge.subList(byAge.size - MAX_PER_BOOK, byAge.size).toList()
+    }
+
+    /**
      * 加一条书签。同位置已存在则**替换**（刷新 label / 时间），不产生重复项。
      *
      * 超过 [MAX_PER_BOOK] 时丢**最早加入**的一条（不是阅读位置最早的）——
@@ -99,11 +114,7 @@ object Bookmarks {
     fun add(file: BookmarkFile, bm: Bookmark): BookmarkFile {
         val k = keyOf(bm)
         val kept = file.items.filterNot { keyOf(it) == k }
-        val appended = kept + bm
-        val trimmed =
-            if (appended.size > MAX_PER_BOOK) appended.subList(appended.size - MAX_PER_BOOK, appended.size).toList()
-            else appended
-        return file.copy(items = trimmed)
+        return file.copy(items = trim(kept + bm).sortedWith(READING_ORDER))
     }
 
     /** 删一条书签；不存在原样返回（避免无谓写盘） */
@@ -131,16 +142,17 @@ object Bookmarks {
             val old = byKey[k]
             if (old == null || bm.createdAt >= old.createdAt) byKey[k] = bm
         }
-        val merged = byKey.values.sortedWith(compareBy({ order(it) }, { it.createdAt }))
-        val trimmed =
-            if (merged.size > MAX_PER_BOOK) merged.subList(merged.size - MAX_PER_BOOK, merged.size).toList()
-            else merged
-        return BookmarkFile(items = trimmed)
+        // **先按加入时间裁剪，再按阅读位置排序输出** —— 顺序不能反。
+        // 反了的话超限时保留的是「书尾那 200 条」，另一台设备刚加在书首的书签会被静默丢掉，
+        // 而这个残缺结果随后被 ProgressSync 推回远端，于是该书签在两台设备与云端同时消失，
+        // 且删除不跨设备传播、无墓碑可恢复 —— 直接违背「书签并集、绝不互相覆盖」。
+        return BookmarkFile(items = trim(byKey.values.toList()).sortedWith(READING_ORDER))
     }
 
     /** 按阅读位置升序；同位置按加入时间（稳定，UI 列表不会跳来跳去） */
-    fun sorted(file: BookmarkFile): List<Bookmark> =
-        file.items.sortedWith(compareBy({ order(it) }, { it.createdAt }))
+    fun sorted(file: BookmarkFile): List<Bookmark> = file.items.sortedWith(READING_ORDER)
+
+    private val READING_ORDER = compareBy<Bookmark>({ order(it) }, { it.createdAt })
 }
 
 /**
@@ -198,13 +210,41 @@ object BookmarkStore {
         if (!src.exists()) return
 
         val cur = load(context, fromId)
-        if (cur.items.isEmpty()) return
+        if (cur.items.isEmpty()) {
+            // 「空书签集就什么都不做」会留下**孤儿侧车**：filesDir/bookmarks/<旧名>.json 还在，
+            // 而 ProgressSync 是按目录枚举的（listJson(dir)），于是这条没人认领的空记录
+            // 会被当成「另一本书」推上云端，之后每次同步都跟着跑。
+            //
+            // 但只在**确实读得出来且为空**时才删：解析失败的文件虽然也没用，
+            // 可它可能只是被截断/被别的进程写坏，保留比删除安全（与 ProgressStore 的
+            // 「move 校验不过就保留旧记录」同一条纪律）。
+            if (isReadableEmpty(src)) {
+                runCatching { src.delete() }
+                    .onFailure { ReadItLog.w("bookmarks move: drop empty sidecar failed: ${it.message}") }
+            } else {
+                ReadItLog.w("bookmarks move: unreadable record kept: $fromId -> $toId")
+            }
+            return
+        }
         save(context, toId, cur)
         if (load(context, toId).items.isEmpty()) {
             ReadItLog.w("bookmarks move unverified, keeping old record: $fromId -> $toId")
             return
         }
         src.delete()
+    }
+
+    /**
+     * 侧车文件能否正常解析、且解析出来没有任何书签。
+     *
+     * 不能用 [load] 的返回值来判断：[load] 在解析异常时也返回空 [BookmarkFile]，
+     * 两种情况分不开 —— 那正是「读不出来」与「真的没有」必须区别对待的地方。
+     */
+    private fun isReadableEmpty(f: File): Boolean = try {
+        gson.fromJson(f.readText(Charsets.UTF_8), BookmarkFile::class.java)
+            ?.items.isNullOrEmpty()
+    } catch (e: Exception) {
+        false
     }
 
     /** 目录，供同步层枚举本机所有书签文件 */

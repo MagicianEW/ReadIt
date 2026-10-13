@@ -162,4 +162,59 @@ class TxtPagerTest {
         println("[PAGER] est = $est, real = $real")
         assertTrue("估算页数应与真实页数同量级（±30%）", est >= real * 0.7 && est <= real * 1.3)
     }
+
+    // ------------------------------------------------------------ 断行点
+
+    @Test
+    fun `tab is a valid break point`() {
+        // 回归：断行字符表里半角空格原本写了两次，第二次本该是制表符，
+        // 于是缩进排版的 txt 永远不在 Tab 处断行，只能硬切在 Tab 串中间。
+        val text = ("\t\t\t").repeat(400) // 1200 字符，无换行无句读
+        val pager = TxtPager(text, charsPerLine = 20, linesPerPage = 10) // capacity 200
+        val p0 = pager.page(0)!!
+        assertEquals("第 0 页必须断在 Tab 之后", 200, p0.length)
+    }
+
+    @Test
+    fun `paragraph break landing exactly on capacity is used`() {
+        // end = from + capacity 恰好是一个换行时，原实现用 `nl < end` 把它挡掉了，
+        // 于是最自然的断点被跳过，版面白白浪费。
+        val capacity = 200
+        val head = "a".repeat(capacity - 1)
+        val text = head + "\n" + "b".repeat(500)
+        val pager = TxtPager(text, charsPerLine = 20, linesPerPage = 10)
+        assertEquals(capacity, pager.capacity)
+        val p0 = pager.page(0)!!
+        assertEquals("应直接用上换行这个断点", capacity, p0.length)
+        assertEquals("下一页应从换行之后开始", 'b', pager.page(1)!!.text[0])
+    }
+
+    @Test
+    fun `no page ever exceeds capacity after the break table change`() {
+        val text = "\t".repeat(997) + "。".repeat(997) + "，".repeat(997)
+        val pager = TxtPager(text, 20, 10)
+        var i = 0
+        val joined = StringBuilder()
+        while (true) {
+            val p = pager.page(i) ?: break
+            assertTrue("第 $i 页超长 ${p.length} > ${pager.capacity}", p.length <= pager.capacity)
+            assertTrue("分页必须推进", p.length > 0)
+            joined.append(p.text)
+            i++
+        }
+        assertEquals("拼接必须还原原文", text, joined.toString())
+    }
+
+    @Test
+    fun `estimated page count stays within a sane band of the exact one`() {
+        // totalPages() 在拖动排版滑条期间改用估算值（否则每格都全书分页），
+        // 所以这里守住「估算不能离谱到让用户以为跳页了」。
+        val text = sample()
+        val pager = TxtPager(text, 20, 10)
+        var real = 0
+        while (pager.page(real) != null) real++
+        val est = pager.estimatedPageCount()
+        println("[PAGER] est=$est real=$real")
+        assertTrue("估算 $est 与真实 $real 偏差过大", est >= real * 0.7 && est <= real * 1.3)
+    }
 }
