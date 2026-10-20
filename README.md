@@ -2,7 +2,7 @@
 
 面向墨水屏（E-Ink）Android 设备的本地阅读器。纯黑白、无动效，性能与刷新策略交给设备档位决定。
 
-当前版本：**v0.1.6**（`versionCode 6` / `applicationId com.readit.eink` / minSdk 19 / targetSdk 34）。
+当前版本：**v0.1.7**（`versionCode 7` / `applicationId com.readit.eink` / minSdk 19 / targetSdk 34）。
 
 ## 特性
 
