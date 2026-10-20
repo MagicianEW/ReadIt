@@ -4,6 +4,7 @@ import android.content.Context
 import android.view.View
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -118,5 +119,78 @@ class TxtCanvasViewTest {
             v.currentPage() > 0
         )
         assertTrue("重新分页后偏移不应归零", v.currentOffset() > 0)
+    }
+
+    // ------------------------------------------------------------ 连续滚动模式
+
+    @Test
+    fun `scroll mode moves the reading offset forward`() {
+        val text = longText(120_000)
+        val v = TxtCanvasView(ctx)
+        v.setDocument(text)
+        layerOutSmall(v)
+        v.pageTurnMode = com.readit.data.PageTurnMode.SCROLL
+
+        val before = v.currentOffset()
+        // 一次滚一屏
+        val moved = v.scrollBy(400f)
+        assertTrue("滚动应生效", moved)
+        assertTrue(
+            "滚动后偏移必须前进：before=$before after=${v.currentOffset()}",
+            v.currentOffset() > before
+        )
+    }
+
+    @Test
+    fun `scroll up at the very beginning does not move and does not crash`() {
+        val v = TxtCanvasView(ctx)
+        v.setDocument(longText(60_000))
+        layerOutSmall(v)
+        v.pageTurnMode = com.readit.data.PageTurnMode.SCROLL
+
+        assertEquals(0, v.currentOffset())
+        // 往上滚过头：必须停住而不是变成负偏移
+        v.scrollBy(-5000f)
+        assertTrue("不能滚到负偏移", v.currentOffset() >= 0)
+    }
+
+    @Test
+    fun `scroll down at the very end stops instead of running off`() {
+        val v = TxtCanvasView(ctx)
+        v.setDocument(longText(20_000))
+        layerOutSmall(v)
+        v.pageTurnMode = com.readit.data.PageTurnMode.SCROLL
+
+        // 反复往下滚，足够多次，必然到头
+        repeat(2000) { v.scrollBy(600f) }
+        val end = v.currentOffset()
+        assertTrue("偏移不能越界", end <= v.totalPages() * 100_000)
+        // 到头后再滚一次不应改变位置
+        v.scrollBy(600f)
+        assertEquals("到头后位置必须稳定", end, v.currentOffset())
+    }
+
+    @Test
+    fun `scroll is a no op outside scroll mode`() {
+        val v = TxtCanvasView(ctx)
+        v.setDocument(longText(60_000))
+        layerOutSmall(v)
+        // 默认是 TAP
+        assertFalse("非滚动模式下 scrollBy 必须返回 false", v.scrollBy(300f))
+    }
+
+    @Test
+    fun `scroll offset is finer grained than the page start`() {
+        // 连续滚动下进度要跟手：滚一点点，偏移就该变一点，
+        // 而不是一直停在页首（那是「一页一跳」的粗进度）。
+        val v = TxtCanvasView(ctx)
+        v.setDocument(longText(120_000))
+        layerOutSmall(v)
+        v.pageTurnMode = com.readit.data.PageTurnMode.SCROLL
+
+        val pageStart = v.currentOffset()
+        v.scrollBy(30f)
+        val moved = v.currentOffset()
+        assertTrue("偏移应随滚动变化", moved != pageStart || v.currentPage() > 0)
     }
 }

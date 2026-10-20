@@ -1,5 +1,6 @@
 package com.readit.reader.pdf
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -12,9 +13,11 @@ import android.os.Handler
 import android.os.Looper
 import android.util.AttributeSet
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import com.readit.core.display.Inversion
 import com.readit.core.display.RenderMode
 import com.readit.core.util.ReadItLog
+import com.readit.data.PageTurnMode
 import com.readit.pdf.PdfBookmark
 import com.readit.pdf.PdfCore
 import com.readit.pdf.PdfCropper
@@ -98,6 +101,69 @@ class PdfRenderView @JvmOverloads constructor(
         }
 
     /**
+     * 翻页方式。
+     *
+     * 只有 [PageTurnMode.ANIM] 在这里有意义：翻页时带横向滑动动画。
+     * 固定版式的 PDF 没有「连续」可言，所以 [PageTurnMode.SCROLL] 对它不适用
+     * （仍按页翻）。
+     */
+    var pageTurnMode: PageTurnMode = PageTurnMode.TAP
+        set(value) {
+            if (field != value) {
+                field = value
+                if (value != PageTurnMode.ANIM) cancelPageAnim()
+            }
+        }
+
+    /** 动画中的**旧页**位图；null = 没在动画 */
+    private var animOld: Bitmap? = null
+    private var animProgress = 1f
+    private var animDir = 0
+    private var pageAnim: ValueAnimator? = null
+
+    /** 待渲染页相对当前页的方向（+1 下一页 / -1 上一页），渲染完成后用于动画 */
+    private var pendingDir = 0
+
+    private fun cancelPageAnim() {
+        pageAnim?.cancel()
+        pageAnim = null
+        animOld?.recycle()
+        animOld = null
+        animProgress = 1f
+        animDir = 0
+    }
+
+    /**
+     * 启动翻页动画（旧页滑出、新页滑入）。
+     *
+     * 旧页位图在动画期间**必须留着**（画完才回收），这是本类里唯一会出现
+     * 「同时持有两张位图」的地方 —— 收尾路径见 [cancelPageAnim] 与 [recyclePage]。
+     */
+    private fun startPageAnim(dir: Int) {
+        pageAnim?.cancel()
+        animDir = dir
+        animProgress = 0f
+        pageAnim = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = ANIM_DURATION_MS
+            interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                animProgress = it.animatedValue as Float
+                invalidate()
+            }
+            addListener(object : android.animation.AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    // 动画结束：旧页位图可以回收了
+                    animOld?.recycle()
+                    animOld = null
+                    animProgress = 1f
+                    invalidate()
+                }
+            })
+            start()
+        }
+    }
+
+    /**
      * 单页渲染超时（R11 缓解措施之一）。
      *
      * Pdfium 在兜底档 SoC 上可能是数百 ms，但一旦超过这个量级基本就是卡死了
@@ -146,6 +212,8 @@ class PdfRenderView @JvmOverloads constructor(
         if (!core.isOpen) return
         val target = index.coerceIn(0, (core.pageCount - 1).coerceAtLeast(0))
         if (target == desiredPage && page != null) return
+        // 动画方向要在**渲染前**定下来：渲染完成时 desiredPage 已经是新值了
+        pendingDir = if (target > desiredPage) 1 else -1
         desiredPage = target
         onPageChanged?.invoke(target, core.pageCount)
         requestRender(target)
@@ -209,7 +277,16 @@ class PdfRenderView @JvmOverloads constructor(
                 }
                 val old = page
                 page = out
-                old?.recycle()
+                if (pageTurnMode == PageTurnMode.ANIM && old != null && !old.isRecycled) {
+                    // 旧页交给动画，动画画完才回收（见 startPageAnim 的收尾）
+                    animOld?.recycle()
+                    animOld = old
+                    startPageAnim(if (pendingDir == 0) 1 else pendingDir)
+                } else {
+                    old?.recycle()
+                    animOld?.recycle()
+                    animOld = null
+                }
                 completedSeq = mySeq
                 invalidate()
                 onPageRendered?.invoke(index)
@@ -255,6 +332,11 @@ class PdfRenderView @JvmOverloads constructor(
     private fun recyclePage() {
         page?.recycle()
         page = null
+        // 动画里的旧页位图也要收，否则会泄漏一整张 Bitmap
+        animOld?.recycle()
+        animOld = null
+        pageAnim?.cancel()
+        pageAnim = null
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
@@ -271,11 +353,32 @@ class PdfRenderView @JvmOverloads constructor(
         val vh = height
         if (vw <= 0 || vh <= 0) return
 
+        // 动画中：旧页滑出、新页滑入
+        val old = animOld
+        if (old != null && !old.isRecycled && animProgress < 1f) {
+            val p = animProgress.coerceIn(0f, 1f)
+            drawPageBitmap(canvas, old, vw, vh, -p * vw * animDir)
+            drawPageBitmap(canvas, bmp, vw, vh, (1f - p) * vw * animDir)
+            return
+        }
+
+        drawPageBitmap(canvas, bmp, vw, vh, 0f)
+    }
+
+    /** 画一页位图；[offsetX] 是翻页动画的横向位移 */
+    private fun drawPageBitmap(canvas: Canvas, bmp: Bitmap, vw: Int, vh: Int, offsetX: Float) {
         val scale = minOf(vw.toFloat() / bmp.width, vh.toFloat() / bmp.height)
         val dw = (bmp.width * scale).toInt().coerceAtLeast(1)
         val dh = (bmp.height * scale).toInt().coerceAtLeast(1)
         val left = (vw - dw) / 2
         val top = (vh - dh) / 2
-        canvas.drawBitmap(bmp, Rect(0, 0, bmp.width, bmp.height), Rect(left, top, left + dw, top + dh), paint)
+        val dx = offsetX.toInt()
+        val dst = Rect(left + dx, top, left + dw + dx, top + dh)
+        canvas.drawBitmap(bmp, Rect(0, 0, bmp.width, bmp.height), dst, paint)
+    }
+
+    companion object {
+        /** 翻页动画时长（与自绘文本路径一致） */
+        private const val ANIM_DURATION_MS = 220L
     }
 }

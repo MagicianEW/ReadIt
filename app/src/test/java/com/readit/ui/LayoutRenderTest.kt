@@ -276,4 +276,50 @@ class LayoutRenderTest {
             root
         }
     }
+
+    // ---------------------------------------------------------------- 状态条真实链路
+
+    /**
+     * 走**真实链路**渲染：TxtCanvasView 出文档 -> 页面回调 -> PageStatusWriter 写状态条。
+     *
+     * 这条用例守的是一个真机上才发现的缺陷：画布的页面回调有两个来源，
+     * 一个在**布局过程中**、一个在**后台线程**，两种情况下直接 setText 都会被丢弃
+     * （症状：页码空白、已读长度条不出现）。修法是 post 到主线程。
+     *
+     * 所以断言不是「文本被 set 了」，而是**渲染出来的像素里真的有页码**。
+     */
+    @Test
+    fun `reader shows the page number through the real canvas callback path`() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val activity = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java)
+            .setup().get()
+        val root = LayoutInflater.from(ctx)
+            .inflate(R.layout.activity_reader, null) as ViewGroup
+        activity.setContentView(root)
+
+        val canvas = root.findViewById<com.readit.reader.txt.TxtCanvasView>(R.id.txtCanvas)
+        val pageInfo = root.findViewById<TextView>(R.id.tvPageInfo)
+        val progress = root.findViewById<ProgressBar>(R.id.pbReadingProgress)
+        val writer = com.readit.ui.reader.PageStatusWriter(ctx, pageInfo, progress)
+        canvas.onPageChanged = { index, total -> writer.apply(index, total) }
+
+        val body = StringBuilder()
+        repeat(200) { i -> body.append("第").append(i + 1).append("行测试正文内容。\n") }
+        canvas.setDocument(body.toString())
+
+        // 走一遍真实布局，再让主线程把 post 出去的写入执行掉
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY)
+        )
+        root.layout(0, 0, 600, 800)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+
+        assertTrue(
+            "页码必须真的写进 TextView（回调 -> post -> 主线程）",
+            pageInfo.text.isNotEmpty()
+        )
+
+        render("06-reader-pageinfo", 600, 800) { root }
+    }
 }

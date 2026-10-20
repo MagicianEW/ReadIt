@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import com.readit.core.display.RenderMode
 import com.readit.core.eal.PerfTier
 import com.readit.core.eal.RefreshMode
+import com.readit.data.PageTurnMode
 
 /**
  * 统一配置读写：SharedPreferences 名 = readit_prefs（规范 §0）。
@@ -18,6 +19,7 @@ class ReadItPrefs(private val sp: SharedPreferences) {
         private const val K_REFRESH_MODE = "refresh_mode"
         /** 文字渲染模式。**注意与 [K_REFRESH_MODE]（E-Ink 刷新模式）是两个不同的东西** */
         private const val K_RENDER_MODE = "render_mode"
+        private const val K_PAGE_TURN_MODE = "page_turn_mode"
         private const val K_FONT_SIZE_SP = "font_size_sp"
         private const val K_FONT_FAMILY = "font_family"
         private const val K_LINE_SPACING = "line_spacing"
@@ -141,6 +143,22 @@ class ReadItPrefs(private val sp: SharedPreferences) {
     fun setRenderModeFromRestore(v: RenderMode) {
         sp.edit().putString(K_RENDER_MODE, v.key).apply()
     }
+
+    /**
+     * 翻页方式（[PageTurnMode]）。
+     *
+     * 默认 [PageTurnMode.TAP]（点按翻页，即 v0.1.7 之前的行为）。
+     *
+     * 这是**用户偏好**而不是设备属性：它描述的是「你想怎么翻书」，
+     * 换设备后依然成立，所以跟字号 / 行距一样正常参与配置备份恢复
+     * （不像性能档位 / 渲染模式那样要按设备隔离）。
+     *
+     * 墨水屏上的强制回落不写回这里 —— 回落发生在
+     * [com.readit.data.resolvePageTurnMode]，偏好值本身原样保留。
+     */
+    var pageTurnMode: PageTurnMode
+        get() = PageTurnMode.from(sp.getString(K_PAGE_TURN_MODE, PageTurnMode.TAP.key))
+        set(v) = sp.edit().putString(K_PAGE_TURN_MODE, v.key).apply()
 
     var fontSizeSp: Float
         get() = com.readit.core.text.Fonts.clampFontSizeSp(sp.getFloat(K_FONT_SIZE_SP, DEFAULT_FONT_SIZE_SP))

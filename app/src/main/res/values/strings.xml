@@ -267,6 +267,15 @@
     <!-- Settings -->
     <string name="cat_performance">性能与显示</string>
     <string name="cat_display">屏幕适配</string>
+
+    <!-- 翻页方式（仅非墨水屏设备显示） -->
+    <string name="pref_page_turn_mode">翻页方式</string>
+    <string name="pref_page_turn_mode_summary">%1$s</string>
+    <string name="page_turn_tap">点按翻页</string>
+    <string name="page_turn_swipe">左右滑动翻页</string>
+    <string name="page_turn_scroll">上下滚动</string>
+    <string name="page_turn_anim">翻页动画</string>
+    <string name="page_turn_eink_locked">检测到墨水屏设备，已固定为点按翻页（动画在墨水屏上会留下残影）</string>
     <string name="cat_typography">字体与排版</string>
 
     <string name="pref_render_mode">文字渲染模式</string>
@@ -428,5 +437,22 @@
         <item>AUTO</item>
         <item>SMOOTH</item>
         <item>SHARP</item>
+    </string-array>
+
+    <!--
+      翻页方式。**只在非墨水屏设备上出现**（设置页按设备判定控制显隐），
+      条目顺序与 PageTurnMode 枚举顺序一致。
+    -->
+    <string-array name="page_turn_entries">
+        <item>@string/page_turn_tap</item>
+        <item>@string/page_turn_swipe</item>
+        <item>@string/page_turn_scroll</item>
+        <item>@string/page_turn_anim</item>
+    </string-array>
+    <string-array name="page_turn_values">
+        <item>TAP</item>
+        <item>SWIPE</item>
+        <item>SCROLL</item>
+        <item>ANIM</item>
     </string-array>
 </resources>

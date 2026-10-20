@@ -68,6 +68,18 @@
             app:key="screen_info"
             app:selectable="false"
             app:title="@string/pref_screen_info" />
+
+        <!--
+            翻页方式：**只在非墨水屏设备上出现**（显隐由 SettingsActivity 按
+            ScreenProfileDetector.einkLikely 控制，代码在 bindDisplay 里）。
+            墨水屏上动画与连续滚动都不合适，强制点按翻页。
+        -->
+        <ListPreference
+            app:defaultValue="TAP"
+            app:entries="@array/page_turn_entries"
+            app:entryValues="@array/page_turn_values"
+            app:key="page_turn_mode"
+            app:title="@string/pref_page_turn_mode" />
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/cat_reading">

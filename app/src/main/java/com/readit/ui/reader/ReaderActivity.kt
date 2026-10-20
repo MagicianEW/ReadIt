@@ -48,6 +48,8 @@ import com.readit.data.BookmarkFile
 import com.readit.data.BookmarkStore
 import com.readit.data.Bookmarks
 import com.readit.data.ProgressPolicy
+import com.readit.data.PageTurnMode
+import com.readit.data.resolvePageTurnMode
 import com.readit.data.ProgressStore
 import com.readit.data.ReadMode
 import com.readit.data.ReadingPosition
@@ -97,8 +99,12 @@ class ReaderActivity : AppCompatActivity() {
 
     private lateinit var tocList: RecyclerView
     private lateinit var pageInfo: TextView
+    /** 实际生效的翻页方式（墨水屏强制回落点按翻页） */
+    private var pageTurn: PageTurnMode = PageTurnMode.TAP
     private lateinit var bookTitle: TextView
     private lateinit var readingProgress: ProgressBar
+    /** 底部状态条写入器（见 [PageStatusWriter]：页码必须 post 到主线程才能写进去） */
+    private lateinit var pageStatus: PageStatusWriter
     private lateinit var panel: LinearLayout
     private lateinit var fontSpinner: Spinner
     private lateinit var btnEncoding: Button
@@ -124,6 +130,8 @@ class ReaderActivity : AppCompatActivity() {
     /** 当前 DOCX 的转换产物目录：打包字体要拷到这里才能被 @font-face 的相对路径命中 */
     private var docxBaseDir: File? = null
     private var downX = 0f
+    /** 上一次滚动事件时的手指 y（滚动要按**增量**算，用累计位移会越滚越快） */
+    private var lastScrollY = 0f
     private var downY = 0f
     private var downStageX = 0f
     private var downStageY = 0f
@@ -293,6 +301,7 @@ class ReaderActivity : AppCompatActivity() {
         pageInfo = findViewById(R.id.tvPageInfo)
         bookTitle = findViewById(R.id.tvBookTitle)
         readingProgress = findViewById(R.id.pbReadingProgress)
+        pageStatus = PageStatusWriter(this, pageInfo, readingProgress)
         panel = findViewById(R.id.panelTypography)
 
         val path = intent.getStringExtra(EXTRA_PATH) ?: run {
@@ -317,6 +326,14 @@ class ReaderActivity : AppCompatActivity() {
         // 屏幕灯：把持久化的开关/亮度作用到当前窗口（首次进入也生效）
         restoreLight()
 
+        // 翻页方式：墨水屏强制回落「点按翻页」（动画在墨水屏上是残影灾难）
+        pageTurn = resolvePageTurnMode(
+            prefs.pageTurnMode,
+            ScreenProfileDetector.einkLikely(this)
+        )
+        canvas.pageTurnMode = pageTurn
+        ReadItLog.i("page turn mode: $pageTurn (pref=${prefs.pageTurnMode.key})")
+
         canvas.fontSizeSp = prefs.fontSizeSp
         canvas.lineSpacing = prefs.lineSpacing
         canvas.marginDp = prefs.marginDp
@@ -330,11 +347,8 @@ class ReaderActivity : AppCompatActivity() {
         canvas.onPageChanged = { index, total ->
             // F26：画布不公开 pageCount，从唯一出口接住总页数
             if (total > 0) canvasTotalPages = total
-            // TalkBack 读不到自绘正文（见 R18 结论），至少给出可定位的方位信息
-            canvas.contentDescription = getString(R.string.a11y_canvas, index + 1, total)
             if (mode != ReadMode.EPUB_FULL && mode != ReadMode.PDF_RENDER && mode != ReadMode.DOCX_HTML) {
-                pageInfo.text = getString(R.string.page_info, index + 1, total)
-                updateReadingProgress(index, total)
+                updatePageStatus(index, total)
             }
             // TXT / DOCX_TEXT / EPUB_TEXT / PDF_TEXT 都走自绘画布，页面回调即「已可见」
             notePageShown(canvas)
@@ -680,14 +694,16 @@ class ReaderActivity : AppCompatActivity() {
 
             override fun onLocation(cfi: String, href: String, spineIndex: Int, page: Int, total: Int) {
                 if (total > 0) {
-                    pageInfo.text = getString(R.string.page_info, page, total)
+                    updatePageStatus(page - 1, total)
                 } else {
-                    pageInfo.text = entries.firstOrNull { it.spineIndex == spineIndex }?.title.orEmpty()
+                    pageInfo.post {
+                        pageInfo.text = entries.firstOrNull { it.spineIndex == spineIndex }?.title.orEmpty()
+                    }
                 }
                 // epub.js 的 page/total 是**章内**分页，不能当全书进度用；
                 // 全书进度按 spine 序号算。
                 val spineTotal = entries.maxOfOrNull { it.spineIndex }?.plus(1) ?: 0
-                updateReadingProgress(spineIndex, spineTotal)
+                updatePageStatus(spineIndex, spineTotal)
             }
 
             override fun onError(message: String) {
@@ -922,6 +938,8 @@ class ReaderActivity : AppCompatActivity() {
     private fun openPdfRender(file: File, saved: ReadingPosition?) {
         val pv = ensurePdfView()
         pv.cropEnabled = prefs.pdfCropEnabled
+        // 翻页动画（PDF 路径）：固定版式没有「连续滚动」可言，SCROLL 模式对它按页翻
+        pv.pageTurnMode = pageTurn
         // 注意：Eal.strategy(this).pdfCachedPages 故意**不**下发。PdfRenderView 恒为单页常驻
         // （§5.1 硬要求），曾经存在的 `pv.cachePages` 属性没有任何读取方，
         // 只会让自审表误以为档位在驱动缓存页数。
@@ -931,8 +949,7 @@ class ReaderActivity : AppCompatActivity() {
         showOnly(pv)
 
         pv.onPageChanged = { page, total ->
-            pageInfo.text = getString(R.string.page_info, page + 1, total)
-            updateReadingProgress(page, total)
+            updatePageStatus(page, total)
         }
         pv.onPageRendered = {
             pdfTimeoutStreak = 0
@@ -1646,18 +1663,25 @@ class ReaderActivity : AppCompatActivity() {
     )
 
     /**
-     * 底部阅读进度条。
+     * 把页码 / 进度写到状态条。
      *
-     * 只在能拿到 (当前, 总数) 且总数有效时显示；否则整条隐藏 ——
-     * 一条 0 宽的黑杠在墨水屏上看着像脏点，不如没有。
+     * **必须 post 到主线程、且等当前布局走完再写。** 画布的回调有两个来源，两个都会让
+     * 直接 setText 失效：
+     *  1. `onSizeChanged -> rebuild() -> notifyPageChanged()` —— 这发生在**布局过程中**，
+     *     此时 `setText` 会触发「布局中调用 requestLayout」，Android 把这次改动丢掉，
+     *     于是页码始终停在空；
+     *  2. `setDocument()` 跑在 **io 线程**（打开 TXT 的解码在后台），它的 `rebuild()`
+     *     同样会回调 —— 那就是**跨线程改 UI**。
+     *
+     * 两条都指向同一个症状：页码不显示、已读长度条不出现。
+     * `View.post` 一次性解决两者：不管从哪个线程、哪个时刻调用，都排到主线程消息队列，
+     * 且在当前这一轮布局结束之后才执行。
      */
-    private fun updateReadingProgress(index: Int, total: Int) {
-        if (total <= 0) {
-            readingProgress.visibility = View.GONE
-            return
-        }
-        readingProgress.visibility = View.VISIBLE
-        readingProgress.progress = ((index + 1) * 100 / total).coerceIn(0, 100)
+    private fun updatePageStatus(index: Int, total: Int) {
+        if (isFinishing || isDestroyed) return
+        pageStatus.apply(index, total)
+        // TalkBack 读不到自绘正文（见 R18 结论），至少给出可定位的方位信息
+        canvas.contentDescription = getString(R.string.a11y_canvas, index + 1, total)
     }
 
     private open class SimpleSeekBarListener : SeekBar.OnSeekBarChangeListener {
@@ -1680,6 +1704,7 @@ class ReaderActivity : AppCompatActivity() {
                 )
                 downX = ev.x
                 downY = ev.y
+                lastScrollY = ev.y
                 downStageX = ev.rawX - stageLoc[0]
                 downStageY = ev.rawY - stageLoc[1]
                 lightGestureDown()
@@ -1687,6 +1712,20 @@ class ReaderActivity : AppCompatActivity() {
             MotionEvent.ACTION_MOVE -> {
                 if (downInStage && lightGestureMove(ev.rawX - stageLoc[0], ev.rawY - stageLoc[1], ev.x, ev.y)) {
                     return true
+                }
+                // 上下滚动模式：纵向拖动交给画布滚动（横向拖动不消费，交给翻页判定）
+                if (downInStage && pageTurn == PageTurnMode.SCROLL) {
+                    val dx = ev.x - downX
+                    val dyTotal = ev.y - downY
+                    if (abs(dyTotal) > abs(dx) && abs(dyTotal) > SWIPE_MIN) {
+                        // 必须用**增量**（相对上一次 MOVE）而不是累计位移：
+                        // 累计位移会让每个 MOVE 事件都把从按下开始的距离再滚一遍，
+                        // 手指稍微一动就飞出去好几屏。
+                        val delta = ev.y - lastScrollY
+                        lastScrollY = ev.y
+                        // 手指往上滑（dy < 0）= 往后看，所以滚动量取 -delta
+                        if (canvas.scrollBy(-delta)) return true
+                    }
                 }
             }
             MotionEvent.ACTION_UP -> {
@@ -1698,10 +1737,22 @@ class ReaderActivity : AppCompatActivity() {
                     val dy = ev.y - downY
                     if (abs(dx) < SWIPE_MIN && abs(dy) < SWIPE_MIN) {
                         // 点击：按 stage 内的相对 x 三分区（左=上一页 / 中=菜单 / 右=下一页）
+                        // （滚动模式下的纵向拖动在 MOVE 里就已被消费，抬手时 dy 会超过
+                        //   SWIPE_MIN，所以不会走到这里被当成点击）
                         syncStageRect()
-                        handleAction(InputMapper.actionForTouch(ev.rawX - stageLoc[0], stage.width))
+                        val action = InputMapper.actionForTouch(ev.rawX - stageLoc[0], stage.width)
+                        // 「左右滑动翻页」模式下点按不再翻页（拇指习惯在手机上滑动，
+                        // 点按翻页容易误触）；但中点调出菜单不属于翻页，仍然保留。
+                        val turnsPage = action == InputMapper.Action.NEXT_PAGE ||
+                            action == InputMapper.Action.PREV_PAGE
+                        if (turnsPage && pageTurn == PageTurnMode.SWIPE) {
+                            // 吞掉这次点按，别让它冒泡成别处的点击
+                            return true
+                        }
+                        handleAction(action)
                         return true
                     } else if (abs(dx) > SWIPE_MIN && abs(dx) > abs(dy)) {
+                        // 左右滑动：所有模式都支持（滑动翻页本身就是它）
                         handleAction(if (dx < 0) InputMapper.Action.NEXT_PAGE else InputMapper.Action.PREV_PAGE)
                         return true
                     }

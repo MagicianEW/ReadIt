@@ -18,6 +18,7 @@ import androidx.preference.SeekBarPreference
 import androidx.preference.SwitchPreferenceCompat
 import com.readit.core.display.RenderMode
 import com.readit.core.display.ScreenProfileDetector
+import com.readit.data.PageTurnMode
 import com.readit.core.display.ScreenProfileResult
 import com.readit.core.eal.DeviceRepository
 import com.readit.core.light.ScreenLight
@@ -265,6 +266,42 @@ class SettingsActivity : AppCompatActivity() {
             }
 
             findPreference<Preference>("screen_info")?.summary = screenInfoLabel(profile)
+
+            bindPageTurn(prefs)
+        }
+
+        /**
+         * 翻页方式：**只在非墨水屏设备上提供**。
+         *
+         * 墨水屏上动画会留下残影、连续滚动会变成整屏整屏地跳，都不是这种屏的
+         * 交互习惯（见 [com.readit.data.PageTurnMode] 的说明）。所以：
+         *  - 判定为墨水屏 -> 整个选项隐藏（不是「显示但禁用」：一个永远不能改的
+         *    选项只会让人反复点）；
+         *  - 用户之前在普通屏上选过非默认方式 -> 偏好值**原样保留**，
+         *    墨水屏上只是不生效，将来在普通屏上又自动恢复。
+         */
+        private fun bindPageTurn(prefs: ReadItPrefs) {
+            val eink = ScreenProfileDetector.einkLikely(requireContext())
+            val pref = findPreference<ListPreference>("page_turn_mode") ?: return
+            pref.isVisible = !eink
+            if (eink) return
+
+            val mode = PageTurnMode.from(prefs.pageTurnMode.key)
+            pref.value = mode.key
+            pref.summary = getString(R.string.pref_page_turn_mode_summary, pageTurnLabel(mode))
+            pref.setOnPreferenceChangeListener { _, newValue ->
+                val m = PageTurnMode.from(newValue as? String)
+                prefs.pageTurnMode = m
+                pref.summary = getString(R.string.pref_page_turn_mode_summary, pageTurnLabel(m))
+                true
+            }
+        }
+
+        private fun pageTurnLabel(mode: PageTurnMode): String = when (mode) {
+            PageTurnMode.TAP -> getString(R.string.page_turn_tap)
+            PageTurnMode.SWIPE -> getString(R.string.page_turn_swipe)
+            PageTurnMode.SCROLL -> getString(R.string.page_turn_scroll)
+            PageTurnMode.ANIM -> getString(R.string.page_turn_anim)
         }
 
         private fun renderModeLabel(preference: RenderMode, resolved: RenderMode): String =
