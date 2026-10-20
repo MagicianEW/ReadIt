@@ -11,8 +11,8 @@ android {
         applicationId = "com.readit.eink"
         minSdk = 19
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.1.7"
+        versionCode = 8
+        versionName = "0.1.8"
         multiDexEnabled = true
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
