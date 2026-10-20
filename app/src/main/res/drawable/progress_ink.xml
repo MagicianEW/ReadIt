@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  阅读进度条 / 书架已读条（墨水屏专用）。
+
+  **只有「已读」一段，没有底槽**：
+  墨水屏灰阶有限，浅灰底槽会被抖动成一片灰点；虚线底槽在 2dp 高度下会碎成锯齿。
+  于是进度只用纯黑表达 —— 线的长度就是比例（书名右侧/页码旁的百分比文字给出精确值）。
+
+  之前试过用 <inset> 在同一个 layer-list 里叠「细线轨道 + 粗线已读」，
+  但 layer-list 的 item 默认撑满父容器，inset 只是把整层压扁，
+  2dp 高的条直接被压成 0 高度而整条消失 —— 同一套视觉语言改用两个独立 View 叠加
+  （细黑线 View 在下、进度条在上），才既可控又可靠。
+
+  高度 2dp：1dp 在部分墨水屏上会因像素对齐而消失，2dp 是「既能看见又不算粗」的下限。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@android:id/progress">
+        <clip>
+            <shape android:shape="rectangle">
+                <solid android:color="@color/readit_fg" />
+            </shape>
+        </clip>
+    </item>
+</layer-list>

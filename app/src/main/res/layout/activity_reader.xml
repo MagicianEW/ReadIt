@@ -52,117 +52,13 @@
                 android:textSize="12sp"
                 android:visibility="gone" />
 
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
+            <!--
+                F27：墨水屏只有黑白两级，没有「背景色」可调，能调的是黑白置换。
 
-                <TextView
-                    android:layout_width="72dp"
-                    android:layout_height="wrap_content"
-                    android:text="@string/label_font_size"
-                    android:textColor="@color/readit_fg"
-                    android:textSize="13sp" />
-
-                <SeekBar
-                    android:id="@+id/sbFontSize"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:contentDescription="@string/label_font_size" />
-
-                <TextView
-                    android:id="@+id/tvFontValue"
-                    android:layout_width="48dp"
-                    android:layout_height="wrap_content"
-                    android:accessibilityLiveRegion="polite"
-                    android:gravity="end"
-                    android:textColor="@color/readit_fg"
-                    android:textSize="13sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:layout_width="72dp"
-                    android:layout_height="wrap_content"
-                    android:text="@string/label_line_spacing"
-                    android:textColor="@color/readit_fg"
-                    android:textSize="13sp" />
-
-                <SeekBar
-                    android:id="@+id/sbLineSpacing"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:contentDescription="@string/label_line_spacing" />
-
-                <TextView
-                    android:id="@+id/tvLineValue"
-                    android:layout_width="48dp"
-                    android:layout_height="wrap_content"
-                    android:accessibilityLiveRegion="polite"
-                    android:gravity="end"
-                    android:textColor="@color/readit_fg"
-                    android:textSize="13sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:layout_width="72dp"
-                    android:layout_height="wrap_content"
-                    android:text="@string/label_margin"
-                    android:textColor="@color/readit_fg"
-                    android:textSize="13sp" />
-
-                <SeekBar
-                    android:id="@+id/sbMargin"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:contentDescription="@string/label_margin" />
-
-                <TextView
-                    android:id="@+id/tvMarginValue"
-                    android:layout_width="48dp"
-                    android:layout_height="wrap_content"
-                    android:accessibilityLiveRegion="polite"
-                    android:gravity="end"
-                    android:textColor="@color/readit_fg"
-                    android:textSize="13sp" />
-            </LinearLayout>
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center_vertical"
-                android:orientation="horizontal">
-
-                <TextView
-                    android:layout_width="72dp"
-                    android:layout_height="wrap_content"
-                    android:text="@string/label_font_family"
-                    android:textColor="@color/readit_fg"
-                    android:textSize="13sp" />
-
-                <Spinner
-                    android:id="@+id/spFontFamily"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:contentDescription="@string/label_font_family" />
-            </LinearLayout>
-
+                放在面板**最上面**而不是最下面：它是唯一「一打开就全屏生效」的开关
+                （正文、工具栏、目录一起翻），放在最底要滚过一整列滑条才够得着。
+                下面那条分隔线把它与「文字排版」分组隔开。
+            -->
             <!-- F27：墨水屏只有黑白两级，没有「背景色」可调，能调的是黑白置换 -->
             <LinearLayout
                 android:layout_width="match_parent"
@@ -185,6 +81,136 @@
                     android:layout_height="@dimen/touch_target_min"
                     android:contentDescription="@string/label_invert" />
             </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:layout_marginTop="6dp"
+                android:layout_marginBottom="2dp"
+                android:background="@color/readit_divider" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp">
+
+                <TextView
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_font_size"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+
+                <SeekBar
+                    android:id="@+id/sbFontSize"
+                    style="@style/InkSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:contentDescription="@string/label_font_size" />
+
+                <TextView
+                    android:id="@+id/tvFontValue"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:gravity="end"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp">
+
+                <TextView
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_line_spacing"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+
+                <SeekBar
+                    android:id="@+id/sbLineSpacing"
+                    style="@style/InkSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:contentDescription="@string/label_line_spacing" />
+
+                <TextView
+                    android:id="@+id/tvLineValue"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:gravity="end"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp">
+
+                <TextView
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_margin"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+
+                <SeekBar
+                    android:id="@+id/sbMargin"
+                    style="@style/InkSeekBar"
+                    android:layout_width="0dp"
+                    android:layout_height="32dp"
+                    android:layout_weight="1"
+                    android:contentDescription="@string/label_margin" />
+
+                <TextView
+                    android:id="@+id/tvMarginValue"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:gravity="end"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingTop="3dp"
+                android:paddingBottom="3dp">
+
+                <TextView
+                    android:layout_width="72dp"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_font_family"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="13sp" />
+
+                <Spinner
+                    android:id="@+id/spFontFamily"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:contentDescription="@string/label_font_family" />
+            </LinearLayout>
+
         </LinearLayout>
 
         <View
@@ -192,6 +218,73 @@
             android:layout_height="1dp"
             android:background="@color/readit_divider" />
 
+
+        <!--
+            阅读状态条：分隔线 + 进度条 + 「第 X / Y 页」+ 书名。
+
+            为什么放在正文**下方**而不是上方：600×800 这类兜底屏的垂直空间极紧张，
+            顶部信息条会实打实挤掉正文行数。放下方则完全不占正文高度
+            （原本这里就有一行页码，只是把信息补全）。
+
+            布局参考同类墨水屏阅读器（KOReader / EinkBro / 微信读书墨水屏版）：
+            底部一条固定的状态区，左侧页码、右侧书名，中间不塞任何可点的东西 ——
+            墨水屏上每一块可点区域都要付出重绘成本，且误触成本高。
+
+            整块包在 barStatus 里是**反色**的需要（见 chromeViews()）：
+            分隔线、进度条、页码、书名必须一起翻，
+            否则只翻其中一部分会得到「黑底上一条浅灰线 + 半黑半白文字」的割裂。
+        -->
+        <LinearLayout
+            android:id="@+id/barStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/readit_divider" />
+
+            <ProgressBar
+                android:id="@+id/pbReadingProgress"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="2dp"
+                android:max="100"
+                android:progressDrawable="@drawable/progress_ink"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="16dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="16dp"
+                android:paddingBottom="8dp">
+
+                <TextView
+                    android:id="@+id/tvPageInfo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:accessibilityLiveRegion="polite"
+                    android:textColor="@color/readit_fg"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/tvBookTitle"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_weight="1"
+                    android:ellipsize="middle"
+                    android:gravity="end"
+                    android:maxLines="1"
+                    android:textColor="@color/readit_fg_secondary"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </LinearLayout>
         <LinearLayout
             android:id="@+id/barButtons"
             android:layout_width="match_parent"
@@ -261,16 +354,6 @@
                 android:text="@string/action_settings"
                 android:textSize="13sp" />
         </LinearLayout>
-
-        <TextView
-            android:id="@+id/tvPageInfo"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:accessibilityLiveRegion="polite"
-            android:gravity="center"
-            android:paddingBottom="4dp"
-            android:textColor="@color/readit_fg_secondary"
-            android:textSize="12sp" />
     </LinearLayout>
 
     <!-- 目录：宽度 90vw 由代码设置 -->

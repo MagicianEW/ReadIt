@@ -9,6 +9,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.ProgressBar
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
@@ -18,8 +19,11 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.readit.core.util.ReadItLog
 import com.readit.data.BookMetaScanner
+import com.readit.data.BookMetaStore
 import com.readit.data.ProgressStore
+import com.readit.data.ShelfRow
 import com.readit.data.buildBookMetaView
+import com.readit.data.buildShelfRow
 import com.readit.data.prefs.ReadItPrefs
 import com.readit.data.stats.ReadingStats
 import com.readit.data.stats.ReadingStatsStore
@@ -81,10 +85,30 @@ class ShelfActivity : AppCompatActivity() {
 
     private fun refresh(empty: TextView) {
         val books = StorageManager.listBooks(this)
-        adapter.submit(books)
+        // 先只提交书名：列表要立刻出现，不能等 IO
+        adapter.submitFiles(books)
         empty.visibility = if (books.isEmpty()) View.VISIBLE else View.GONE
-        // 后台增量扫描：只对没算过 / 文件变了的书算元数据（全库扫描但非阻塞、可缓存）
-        metaScanExecutor.submit { runCatching { BookMetaScanner.scanLibrary(this) } }
+        findViewById<TextView>(R.id.tvCount).text = getString(R.string.shelf_count, books.size)
+
+        // 后台补副标题（进度 / 字数 / 章节）：读进度与元数据都是文件 IO，不能在主线程做
+        metaScanExecutor.submit {
+            publishRows(books)
+            // 增量扫描：只对没算过 / 文件变了的书算元数据（全库扫描但非阻塞、可缓存）
+            val updated = runCatching { BookMetaScanner.scanLibrary(this) }.getOrDefault(0)
+            // 只有真的重算过才再刷一次副标题 —— 每次 resume 都读两遍整库元数据是白花的
+            if (updated > 0) publishRows(books)
+        }
+    }
+
+    /** 把书架行（含副标题）送到主线程刷新。row 的组装在后台完成。 */
+    private fun publishRows(books: List<File>) {
+        val rows = books.map {
+            buildShelfRow(it, BookMetaStore.load(this, it.name), ProgressStore.load(this, it.name))
+        }
+        runOnUiThread {
+            if (isFinishing || isDestroyed) return@runOnUiThread
+            adapter.submitRows(rows)
+        }
     }
 
     private fun openBook(file: File) {
@@ -356,9 +380,17 @@ class ShelfActivity : AppCompatActivity() {
         private val onLongClick: (File) -> Unit
     ) : RecyclerView.Adapter<BookAdapter.Holder>() {
 
-        private val items = ArrayList<File>()
+        private val items = ArrayList<ShelfRow>()
 
-        fun submit(list: List<File>) {
+        /** 先只出书名（列表秒开），副标题等后台算完再补 */
+        fun submitFiles(list: List<File>) {
+            items.clear()
+            items.addAll(list.map { ShelfRow(it) })
+            notifyDataSetChanged()
+        }
+
+        /** 带副标题的完整行 */
+        fun submitRows(list: List<ShelfRow>) {
             items.clear()
             items.addAll(list)
             notifyDataSetChanged()
@@ -380,8 +412,39 @@ class ShelfActivity : AppCompatActivity() {
             private val onLongClick: (File) -> Unit
         ) : RecyclerView.ViewHolder(view) {
             private val tv = view.findViewById<TextView>(R.id.tvBookName)
-            fun bind(file: File) {
+            private val tvPercent = view.findViewById<TextView>(R.id.tvBookPercent)
+            private val tvMeta = view.findViewById<TextView>(R.id.tvBookMeta)
+            private val pb = view.findViewById<ProgressBar>(R.id.pbBookProgress)
+
+            fun bind(row: ShelfRow) {
+                val file = row.file
                 tv.text = file.name
+
+                // 进度百分比：算不出来就不显示这一格（不写「—」占位）
+                val pct = row.percent
+                if (pct == null) {
+                    tvPercent.visibility = View.GONE
+                } else {
+                    tvPercent.visibility = View.VISIBLE
+                    tvPercent.text = itemView.context.getString(R.string.shelf_meta_progress, pct)
+                }
+
+                // 副标题：字数 / 章节，没有就整行隐藏
+                if (row.metaText.isEmpty()) {
+                    tvMeta.visibility = View.GONE
+                } else {
+                    tvMeta.visibility = View.VISIBLE
+                    tvMeta.text = row.metaText
+                }
+
+                // 已读条：无进度就不画（一条 0 宽的黑杠看着像脏点）
+                if (pct == null) {
+                    pb.visibility = View.GONE
+                } else {
+                    pb.visibility = View.VISIBLE
+                    pb.progress = pct
+                }
+
                 itemView.setOnClickListener { onClick(file) }
                 itemView.setOnLongClickListener {
                     onLongClick(file)
@@ -389,8 +452,16 @@ class ShelfActivity : AppCompatActivity() {
                 }
                 // TalkBack：只报文件名不够，要说明这一项是「可打开」的，
                 // 以及长按还能改名 / 删除（否则这两个功能对读屏用户等于不存在）
-                itemView.contentDescription =
+                val spoken = if (pct == null) {
                     itemView.context.getString(R.string.a11y_open_book, file.name)
+                } else {
+                    itemView.context.getString(
+                        R.string.a11y_open_book_progress,
+                        file.name,
+                        itemView.context.getString(R.string.shelf_meta_progress, pct)
+                    )
+                }
+                itemView.contentDescription = spoken
             }
         }
     }

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  墨水屏高对比度滑条。
+
+  系统默认滑条是「浅灰轨道 + 淡色小圆点」。墨水屏只有有限灰阶，这两样都会被
+  抖动成一片灰点 —— 正是墨水屏用户最反感的「控件发灰看不清」。
+  同类墨水屏应用（EinkBro）把「所有控件都是高对比度」列为基本要求。
+
+  这里用纯黑两态表达进度，不依赖任何灰阶：
+    未走过的部分 = 1dp 细黑线
+    已走过的部分 = 4dp 粗黑线（线本身变粗，而不是变灰）
+    滑块       = 实心黑圆点
+  粗细之差在 1-bit 屏上依然是清晰的黑白两态。
+
+  **轨道必须用 inset 压出高度**：layer-list 的 item 默认撑满父容器，
+  直接给 shape 写 <size> 是压不住的 —— 结果就是整条滑条变成一根实心黑棒。
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 未走过：1dp 细线 -->
+    <item android:id="@android:id/background">
+        <inset
+            android:insetTop="15dp"
+            android:insetBottom="15dp">
+            <shape android:shape="rectangle">
+                <solid android:color="@color/readit_fg" />
+            </shape>
+        </inset>
+    </item>
+    <!-- 已走过：4dp 粗线 -->
+    <item android:id="@android:id/progress">
+        <clip>
+            <inset
+                android:insetTop="14dp"
+                android:insetBottom="14dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/readit_fg" />
+                </shape>
+            </inset>
+        </clip>
+    </item>
+</layer-list>

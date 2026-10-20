@@ -25,6 +25,20 @@
 
     <!-- Shelf -->
     <string name="shelf_empty">还没有书，点「导入」添加 TXT / EPUB / DOCX / PDF</string>
+
+    <!-- 书架：书名下方的副标题（进度 / 字数 / 章节） -->
+    <string name="shelf_count">共 %1$d 本</string>
+    <string name="shelf_meta_line">%1$s · %2$s</string>
+    <string name="shelf_meta_progress">已读 %1$d%%</string>
+    <string name="shelf_meta_unread">未读</string>
+    <string name="shelf_meta_chars">%1$s 字</string>
+    <string name="shelf_meta_chapters">%1$d 章</string>
+    <string name="shelf_meta_new">未开始</string>
+
+    <!-- 目录：当前所在章节 -->
+    <string name="toc_current_marker">当前</string>
+    <string name="a11y_chapter_current">%1$s，当前所在章节</string>
+
     <string name="action_import">导入</string>
     <string name="action_settings">设置</string>
     <string name="action_toc">目录</string>
@@ -152,6 +166,7 @@
     <!-- 无障碍（TalkBack）：文案即朗读内容，改动请一并评估朗读效果 -->
     <string name="a11y_canvas">正文区域，第 %1$d 页，共 %2$d 页</string>
     <string name="a11y_open_book">打开 %1$s，长按可重命名或删除</string>
+    <string name="a11y_open_book_progress">打开 %1$s，已读 %2$s，长按可重命名或删除</string>
     <string name="a11y_chapter_item">目录项 %1$s</string>
 
     <!-- 首次启动引导（Phase 4） -->

@@ -28,13 +28,26 @@ import java.io.File
 object BookMetaScanner {
 
     /** 取某本书的元数据：命中缓存则直接返回，否则后台算完落盘再返回 */
-    fun ensure(context: Context, file: File, force: Boolean = false): BookMeta {
+    fun ensure(context: Context, file: File, force: Boolean = false): BookMeta =
+        ensureWithFlag(context, file, force).first
+
+    /**
+     * 与 [ensure] 相同，但额外返回「本次是否真的重算了」。
+     *
+     * 批量扫描需要知道「有没有书变了」：没变就不该让调用方再把整库读一遍
+     * （那是书架每次 resume 都要付的一遍成本）。
+     */
+    fun ensureWithFlag(
+        context: Context,
+        file: File,
+        force: Boolean = false
+    ): Pair<BookMeta, Boolean> {
         val bookId = file.name
         val existing = BookMetaStore.load(context, bookId)
         val sig = BookMetaStore.signatureOf(file)
 
         if (!force && existing != null && existing.signature == sig && existing.isComputed()) {
-            return existing
+            return existing to false
         }
 
         val computed = runCatching { compute(file, context) }.getOrDefault(BookMeta())
@@ -44,16 +57,24 @@ object BookMetaScanner {
             computedAt = System.currentTimeMillis()
         )
         BookMetaStore.save(context, bookId, meta)
-        return meta
+        return meta to true
     }
 
-    /** 后台全库扫描：只对没算过 / 签名变化的书算，已算过的直接跳过 */
-    fun scanLibrary(context: Context) {
+    /**
+     * 后台全库扫描：只对没算过 / 签名变化的书算，已算过的直接跳过。
+     *
+     * @return 本次**真正重算过**的书本数。0 表示书库没变化，
+     *         调用方据此可以省掉「再读一遍整库元数据」那一步。
+     */
+    fun scanLibrary(context: Context): Int {
         val books = runCatching { StorageManager.listBooks(context) }.getOrDefault(emptyList())
+        var updated = 0
         for (f in books) {
-            runCatching { ensure(context, f) }
+            runCatching { ensureWithFlag(context, f) }
+                .onSuccess { if (it.second) updated++ }
                 .onFailure { ReadItLog.w("scan book failed: ${f.name}") }
         }
+        return updated
     }
 
     // ---------------------------------------------------------------- 格式分发

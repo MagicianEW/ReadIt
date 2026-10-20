@@ -1,12 +1,75 @@
 <?xml version="1.0" encoding="utf-8"?>
-<TextView xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/tvBookName"
+<!--
+  书架列表项。
+
+  两行结构：书名（主）+ 副标题（进度 / 字数 / 章节）+ 一条已读长度条。
+
+  为什么加这些：原先整行只有一个书名，扫一眼书架分不出「哪本读了一半、哪本还没开始」，
+  而这些数据项目里**已经有了**（BookMeta 的字数/章节数、ProgressStore 的进度），
+  只是只在「长按 → 属性」对话框里露过脸。同类阅读器（Kindle / 微信读书 / KOReader）
+  的书库列表都会把进度和体量直接摊在列表上 —— 这是书架最有用的一个信息维度。
+
+  E-Ink 约束：
+  - 副标题用次级色（#666666）而非更浅的灰：墨水屏灰阶有限，再浅就会被抖动成噪点。
+  - 进度条是纯黑实心、无底槽（见 drawable/progress_ink.xml），避免浅灰槽在屏上糊成一片。
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:minHeight="@dimen/touch_target_min"
     android:background="?android:attr/selectableItemBackground"
-    android:gravity="center_vertical"
+    android:orientation="vertical"
     android:paddingStart="16dp"
+    android:paddingTop="10dp"
     android:paddingEnd="16dp"
-    android:textColor="@color/readit_fg"
-    android:textSize="15sp" />
+    android:paddingBottom="10dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:baselineAligned="true"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/tvBookName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="middle"
+            android:maxLines="2"
+            android:textColor="@color/readit_fg"
+            android:textSize="15sp" />
+
+        <TextView
+            android:id="@+id/tvBookPercent"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:minWidth="40dp"
+            android:gravity="end"
+            android:textColor="@color/readit_fg_secondary"
+            android:textSize="12sp"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvBookMeta"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:textColor="@color/readit_fg_secondary"
+        android:textSize="12sp"
+        android:visibility="gone" />
+
+    <ProgressBar
+        android:id="@+id/pbBookProgress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="2dp"
+        android:layout_marginTop="6dp"
+        android:max="100"
+        android:progressDrawable="@drawable/progress_ink"
+        android:visibility="gone" />
+</LinearLayout>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      墨水屏高对比度滑条。
+
+      系统默认滑条在墨水屏上是浅灰轨道 + 淡色滑块，灰阶有限时会抖成噪点。
+      这里统一换成纯黑两态（见 drawable/seekbar_ink.xml）。
+    -->
+    <!--
+      名字里**不能带点**：Kotlin/Android 资源把「A.B」当作「A 的子类」，
+      于是 style/SeekBar.Ink 会去找一个并不存在的父样式 SeekBar，AAPT 直接报
+      resource style/SeekBar not found。所以这里用无点的 InkSeekBar。
+    -->
+    <style name="InkSeekBar">
+        <item name="android:progressDrawable">@drawable/seekbar_ink</item>
+        <item name="android:thumb">@drawable/seekbar_ink_thumb</item>
+    </style>
+</resources>

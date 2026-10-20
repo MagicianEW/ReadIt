@@ -12,15 +12,33 @@
         android:orientation="horizontal"
         android:padding="8dp">
 
-        <TextView
-            android:id="@+id/tvTitle"
+        <!--
+            标题块：应用名 + 书籍数量。
+            数量放在标题下方而不是右上角，是因为右上角已经占了三个操作按钮；
+            「共 N 本」是书架的规模信息，和标题同属「这是什么页面」这一层。
+        -->
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="@string/app_name"
-            android:textColor="@color/readit_fg"
-            android:textSize="18sp"
-            android:textStyle="bold" />
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tvTitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/app_name"
+                android:textColor="@color/readit_fg"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvCount"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/readit_fg_secondary"
+                android:textSize="12sp" />
+        </LinearLayout>
 
         <Button
             android:id="@+id/btnStats"

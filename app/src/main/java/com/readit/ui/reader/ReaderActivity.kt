@@ -16,6 +16,7 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.Switch
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -96,6 +97,8 @@ class ReaderActivity : AppCompatActivity() {
 
     private lateinit var tocList: RecyclerView
     private lateinit var pageInfo: TextView
+    private lateinit var bookTitle: TextView
+    private lateinit var readingProgress: ProgressBar
     private lateinit var panel: LinearLayout
     private lateinit var fontSpinner: Spinner
     private lateinit var btnEncoding: Button
@@ -288,6 +291,8 @@ class ReaderActivity : AppCompatActivity() {
         drawer = findViewById(R.id.drawer)
         tocList = findViewById(R.id.rvToc)
         pageInfo = findViewById(R.id.tvPageInfo)
+        bookTitle = findViewById(R.id.tvBookTitle)
+        readingProgress = findViewById(R.id.pbReadingProgress)
         panel = findViewById(R.id.panelTypography)
 
         val path = intent.getStringExtra(EXTRA_PATH) ?: run {
@@ -297,6 +302,8 @@ class ReaderActivity : AppCompatActivity() {
         val file = File(path)
         bookId = file.name
         bookFile = file
+        // 状态条右侧显示书名：长书翻到一半时，这是唯一能确认「我在哪本书」的线索
+        bookTitle.text = file.nameWithoutExtension
         // §7 的四个时限都以「打开动作」为起点，必须在任何 open* 之前取
         openStartedAt = Metrics.now()
         btnEncoding = findViewById(R.id.btnEncoding)
@@ -327,6 +334,7 @@ class ReaderActivity : AppCompatActivity() {
             canvas.contentDescription = getString(R.string.a11y_canvas, index + 1, total)
             if (mode != ReadMode.EPUB_FULL && mode != ReadMode.PDF_RENDER && mode != ReadMode.DOCX_HTML) {
                 pageInfo.text = getString(R.string.page_info, index + 1, total)
+                updateReadingProgress(index, total)
             }
             // TXT / DOCX_TEXT / EPUB_TEXT / PDF_TEXT 都走自绘画布，页面回调即「已可见」
             notePageShown(canvas)
@@ -354,6 +362,9 @@ class ReaderActivity : AppCompatActivity() {
             if (entries.isEmpty()) {
                 Toast.makeText(this, getString(R.string.toc_empty), Toast.LENGTH_SHORT).show()
             } else {
+                // 打开目录时才算「当前章」：目录最多 2000 项，每翻一页都扫一遍纯属浪费，
+                // 而抽屉关闭时用户根本看不到高亮。
+                updateTocCurrent()
                 drawer.openDrawer(GravityCompat.START)
             }
         }
@@ -673,6 +684,10 @@ class ReaderActivity : AppCompatActivity() {
                 } else {
                     pageInfo.text = entries.firstOrNull { it.spineIndex == spineIndex }?.title.orEmpty()
                 }
+                // epub.js 的 page/total 是**章内**分页，不能当全书进度用；
+                // 全书进度按 spine 序号算。
+                val spineTotal = entries.maxOfOrNull { it.spineIndex }?.plus(1) ?: 0
+                updateReadingProgress(spineIndex, spineTotal)
             }
 
             override fun onError(message: String) {
@@ -917,6 +932,7 @@ class ReaderActivity : AppCompatActivity() {
 
         pv.onPageChanged = { page, total ->
             pageInfo.text = getString(R.string.page_info, page + 1, total)
+            updateReadingProgress(page, total)
         }
         pv.onPageRendered = {
             pdfTimeoutStreak = 0
@@ -1587,12 +1603,62 @@ class ReaderActivity : AppCompatActivity() {
      * **不能**包含 `stage` 或根 `drawer`：它们是内容视图的父级，而内容视图
      * （自绘画布 / Pdfium / 两条 WebView）各自已实现反色，叠加会变成二次反色。
      */
+    /**
+     * 定位「当前所在章节」并通知目录 adapter 高亮。
+     *
+     * 口径按渲染路径分：
+     *  - 自绘文本（TXT / EPUB 文本降级 / DOCX 文本降级 / PDF 文本降级）：按字符偏移，
+     *    取最后一个 `offset <= 当前偏移` 的条目
+     *  - PDF 原版渲染：按页码，取最后一个 `pageIndex <= 当前页` 的条目
+     *  - EPUB / DOCX 原版渲染（WebView）：拿不到滚动位置，**不高亮** ——
+     *    猜一个位置比不标更糟（用户会以为目录指错了地方）
+     */
+    private fun updateTocCurrent() {
+        if (entries.isEmpty()) {
+            tocAdapter.setCurrent(-1)
+            return
+        }
+        val current = when (mode) {
+            ReadMode.PDF_RENDER -> {
+                val page = pdfView?.currentPage ?: -1
+                if (page < 0) -1 else entries.indexOfLast { it.pageIndex in 0..page }
+            }
+            ReadMode.EPUB_FULL, ReadMode.DOCX_HTML -> -1
+            else -> {
+                if (!::canvas.isInitialized) -1
+                else {
+                    val off = canvas.currentOffset()
+                    entries.indexOfLast { it.offset in 0..off }
+                }
+            }
+        }
+        tocAdapter.setCurrent(current)
+    }
+
     private fun chromeViews(): List<View> = listOfNotNull(
         panel,
         findViewById<View>(R.id.barButtons),
-        pageInfo,
+        // 整块状态条一起翻：分隔线 + 进度条 + 页码 + 书名。
+        // 翻 pageInfo 单个 TextView 的话，同一行的书名与上方的进度条会留在原色，
+        // 在墨水屏上就是「黑底上飘着一条浅灰线 + 半黑半白的一行字」。
+        findViewById<View>(R.id.barStatus),
         tocList
     )
+
+    /**
+     * 底部阅读进度条。
+     *
+     * 只在能拿到 (当前, 总数) 且总数有效时显示；否则整条隐藏 ——
+     * 一条 0 宽的黑杠在墨水屏上看着像脏点，不如没有。
+     */
+    private fun updateReadingProgress(index: Int, total: Int) {
+        if (total <= 0) {
+            readingProgress.visibility = View.GONE
+            return
+        }
+        readingProgress.visibility = View.VISIBLE
+        readingProgress.progress = ((index + 1) * 100 / total).coerceIn(0, 100)
+    }
 
     private open class SimpleSeekBarListener : SeekBar.OnSeekBarChangeListener {
         override fun onProgressChanged(seekBar: SeekBar, value: Int, fromUser: Boolean) {}
@@ -1844,10 +1910,28 @@ class ReaderActivity : AppCompatActivity() {
 
         private val items = ArrayList<TocEntry>()
 
+        /** 当前所在章节的下标；-1 = 没有可标注的当前章节 */
+        private var currentIndex: Int = -1
+
         fun submit(list: List<TocEntry>) {
             items.clear()
             items.addAll(list)
+            currentIndex = -1
             notifyDataSetChanged()
+        }
+
+        /**
+         * 标注当前章节。
+         *
+         * 只重绘受影响的两个 item，不整表刷新 —— 整表刷新在 2000 章的目录上
+         * 会让抽屉打开时明显卡一下，而墨水屏上重绘成本还是实打实的。
+         */
+        fun setCurrent(index: Int) {
+            if (index == currentIndex) return
+            val old = currentIndex
+            currentIndex = index
+            if (old in items.indices) notifyItemChanged(old)
+            if (index in items.indices) notifyItemChanged(index)
         }
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder =
@@ -1856,19 +1940,30 @@ class ReaderActivity : AppCompatActivity() {
                 onClick
             )
 
-        override fun onBindViewHolder(h: Holder, pos: Int) = h.bind(items[pos])
+        override fun onBindViewHolder(h: Holder, pos: Int) = h.bind(items[pos], pos == currentIndex)
         override fun getItemCount(): Int = items.size
 
         class Holder(view: View, private val onClick: (TocEntry) -> Unit) :
             RecyclerView.ViewHolder(view) {
             private val tv = view.findViewById<TextView>(R.id.tvChapterTitle)
-            fun bind(entry: TocEntry) {
-                tv.text = entry.title
+            fun bind(entry: TocEntry, isCurrent: Boolean) {
+                // 当前章节：**加粗 + 「当前」标记**。
+                // 墨水屏只有黑白两态，没有颜色可用，靠字重与文字标记来区分层级最稳；
+                // 单独用「当前」两字在长标题里又容易被忽略，所以两个一起上。
+                tv.text = if (isCurrent) {
+                    entry.title + "  " + itemView.context.getString(R.string.toc_current_marker)
+                } else {
+                    entry.title
+                }
+                tv.setTypeface(null, if (isCurrent) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
                 val indent = (8 + entry.depth.coerceAtMost(4) * 12) * itemView.resources.displayMetrics.density
                 tv.setPadding(indent.toInt(), tv.paddingTop, tv.paddingRight, tv.paddingBottom)
                 itemView.setOnClickListener { onClick(entry) }
-                itemView.contentDescription =
+                itemView.contentDescription = if (isCurrent) {
+                    itemView.context.getString(R.string.a11y_chapter_current, entry.title)
+                } else {
                     itemView.context.getString(R.string.a11y_chapter_item, entry.title)
+                }
             }
         }
     }
