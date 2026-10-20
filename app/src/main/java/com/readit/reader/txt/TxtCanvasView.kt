@@ -272,6 +272,16 @@ class TxtCanvasView @JvmOverloads constructor(
 
     /** 动画的起始页；-1 = 没在动画 */
     private var animFromPage = -1
+
+    /**
+     * 翻页动画是否正在进行。
+     *
+     * 暴露成只读属性有两个用处：调试时能直接看状态；
+     * 以及**让「动画有没有真的启动」可以被测** ——
+     * 单测里 Robolectric 的 ValueAnimator 会在一次 idle 里把动画直接跑完，
+     * 靠像素分布判断「动画中间帧」是不可靠的（实测会假阳性）。
+     */
+    val isPageAnimating: Boolean get() = animFromPage >= 0
     private var animProgress = 1f
     private var animDir = 0
     private var pageAnim: ValueAnimator? = null

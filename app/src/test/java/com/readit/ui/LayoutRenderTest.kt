@@ -14,6 +14,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.readit.eink.R
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -322,4 +323,100 @@ class LayoutRenderTest {
 
         render("06-reader-pageinfo", 600, 800) { root }
     }
+
+    /**
+     * 翻页动画：翻页那一刻**旧页还在原位、新页在屏外**，动画才真正跑起来。
+     *
+     * 这里不靠像素分布判定动画中间帧 —— Robolectric 的 ValueAnimator 会在一次 idle
+     * 里把动画直接跑完（实测那样测出来的像素断言是假阳性）。
+     * 改用**可观测状态**：[TxtCanvasView.isPageAnimating]。
+     *
+     * 同时对比两种模式渲染出的帧：ANIM 模式下刚翻完那一帧应当仍是**旧页**
+     * （进度 0：新页在 x=+600 的屏外），TAP 模式则是**新页** —— 两帧必须不同。
+     */
+    @Test
+    fun `page turn animation keeps the old page on screen at the first frame`() {
+        val animFrame = renderReaderAt(mode = com.readit.data.PageTurnMode.ANIM, turn = true)
+        val tapFrame = renderReaderAt(mode = com.readit.data.PageTurnMode.TAP, turn = true)
+        File(outDir, "08-anim-first-frame.png").outputStream()
+            .use { animFrame.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        File(outDir, "09-tap-first-frame.png").outputStream()
+            .use { tapFrame.compress(Bitmap.CompressFormat.PNG, 100, it) }
+
+        assertTrue(
+            "ANIM 与 TAP 渲染出的帧必须不同（ANIM 停在旧页、TAP 已是新页）",
+            pixelsDiffer(animFrame, tapFrame)
+        )
+    }
+
+    @Test
+    fun `anim mode starts the animation and switching away cancels it`() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val activity = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java)
+            .setup().get()
+        val root = LayoutInflater.from(ctx)
+            .inflate(R.layout.activity_reader, null) as ViewGroup
+        activity.setContentView(root)
+        val canvas = root.findViewById<com.readit.reader.txt.TxtCanvasView>(R.id.txtCanvas)
+        canvas.setDocument(bodyText())
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY)
+        )
+        root.layout(0, 0, 600, 800)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+
+        canvas.pageTurnMode = com.readit.data.PageTurnMode.ANIM
+        canvas.nextPage()
+        assertTrue("翻页必须启动动画", canvas.isPageAnimating)
+
+        // 切走模式 -> 动画必须被取消（否则会停在两页之间）
+        canvas.pageTurnMode = com.readit.data.PageTurnMode.TAP
+        assertFalse("切走模式必须取消动画", canvas.isPageAnimating)
+    }
+
+    private fun bodyText(): String = buildString {
+        repeat(400) { i -> append("第").append(i + 1).append("行：动画翻页测试正文。\n") }
+    }
+
+    /** 打开一个 TXT 文档、翻一页，返回渲染出的位图 */
+    private fun renderReaderAt(
+        mode: com.readit.data.PageTurnMode,
+        turn: Boolean
+    ): Bitmap {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val activity = org.robolectric.Robolectric.buildActivity(android.app.Activity::class.java)
+            .setup().get()
+        val root = LayoutInflater.from(ctx)
+            .inflate(R.layout.activity_reader, null) as ViewGroup
+        activity.setContentView(root)
+        val canvas = root.findViewById<com.readit.reader.txt.TxtCanvasView>(R.id.txtCanvas)
+        canvas.pageTurnMode = mode
+        canvas.setDocument(bodyText())
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(600, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(800, View.MeasureSpec.EXACTLY)
+        )
+        root.layout(0, 0, 600, 800)
+        org.robolectric.shadows.ShadowLooper.idleMainLooper()
+        if (turn) canvas.nextPage()
+
+        val bmp = Bitmap.createBitmap(600, 800, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.drawColor(Color.WHITE)
+        root.draw(c)
+        return bmp
+    }
+
+    /** 两张位图是否有任何像素不同（抽样比较，避免逐像素太慢） */
+    private fun pixelsDiffer(a: Bitmap, b: Bitmap): Boolean {
+        if (a.width != b.width || a.height != b.height) return true
+        for (y in 0 until a.height step 3) {
+            for (x in 0 until a.width step 3) {
+                if (a.getPixel(x, y) != b.getPixel(x, y)) return true
+            }
+        }
+        return false
+    }
+
 }
